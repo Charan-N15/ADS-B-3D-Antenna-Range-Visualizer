@@ -1,0 +1,35 @@
+[Unit]
+Description=ADS-B Antenna Range Visualizer collector
+After=network-online.target readsb.service lighttpd.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=range3d
+Group=range3d
+EnvironmentFile=-/etc/default/range3d
+ExecStart=/usr/bin/python3 /usr/local/bin/range3d_collect.py \
+  $RANGE3D_BASE_URL $RANGE3D_STATE $RANGE3D_ANTENNA_FT \
+  collect $RANGE3D_COLLECT_OPTIONS
+Restart=always
+RestartSec=10
+
+# This runs on a working receiver. It polls one local HTTP endpoint and writes one
+# directory; it should not be able to do anything else.
+Nice=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+ReadWritePaths=/var/lib/range3d
+MemoryMax=192M
+
+[Install]
+WantedBy=multi-user.target

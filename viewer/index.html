@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>range3d</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.js",
+    "three/addons/controls/OrbitControls.js": "./vendor/three/OrbitControls.js"
+  }
+}
+</script>
+</head>
+<body>
+
+<div id="stage">
+  <canvas id="scene"></canvas>
+  <canvas id="slice" hidden></canvas>
+  <div id="hint">drag to orbit &middot; wheel to zoom &middot; click the surface for the contact that set it</div>
+  <div id="attribution"></div>
+</div>
+
+<div id="panel">
+  <div class="group">
+    <div class="row views">
+      <button class="view on" data-view="orbit">ORBIT</button>
+      <button class="view" data-view="top">TOP</button>
+      <button class="view" data-view="slice">SLICE</button>
+    </div>
+  </div>
+
+  <div class="group">
+    <h2>layers</h2>
+    <label><input type="checkbox" id="layerEnvelope" checked> envelope surface</label>
+    <label><input type="checkbox" id="layerContours" checked> altitude rings</label>
+    <label><input type="checkbox" id="layerHorizon" checked> theoretical horizon</label>
+    <label><input type="checkbox" id="layerAircraft" checked> live traffic</label>
+    <label><input type="checkbox" id="layerGround" checked> range rings</label>
+    <label><input type="checkbox" id="layerBasemap" checked> map</label>
+    <label class="slider">map level <span id="mapOpacityOut">75%</span>
+      <input type="range" id="mapOpacity" min="0" max="100" step="5" value="75"></label>
+  </div>
+
+  <div class="group">
+    <h2>view</h2>
+    <label class="slider">vertical <span id="exagOut">8&times;</span>
+      <input type="range" id="exag" min="1" max="24" step="1" value="8"></label>
+    <label><input type="checkbox" id="curvature" checked> earth curvature</label>
+    <label><input type="checkbox" id="colorByAlt" checked> colour by altitude</label>
+  </div>
+
+  <div class="group" id="altLegendGroup">
+    <h2>altitude</h2>
+    <ul id="altLegend"></ul>
+  </div>
+
+  <div class="group">
+    <h2>data</h2>
+    <label class="slider">smooth <span id="smoothOut">5&deg;</span>
+      <input type="range" id="smooth" min="1" max="15" step="2" value="5"></label>
+    <label class="slider">min hits <span id="hitsOut">2</span>
+      <input type="range" id="hits" min="1" max="6" step="1" value="2"></label>
+    <label><input type="checkbox" id="closure" checked> altitude closure</label>
+    <label class="field">antenna ft
+      <input type="number" id="rxAlt" min="0" max="10000" step="10" value="100"></label>
+  </div>
+
+  <div class="group" id="sliceControls" hidden>
+    <h2>slice</h2>
+    <label class="slider">bearing <span id="azOut">000&deg;</span>
+      <input type="range" id="sliceAz" min="0" max="359" step="1" value="0"></label>
+    <label class="slider">spread <span id="spreadOut">&plusmn;5&deg;</span>
+      <input type="range" id="sliceSpread" min="0" max="30" step="1" value="5"></label>
+  </div>
+
+  <div class="group">
+    <h2>settings</h2>
+    <div class="row">
+      <button id="saveSettings">SAVE VIEW</button>
+      <button id="resetSettings">RESET</button>
+    </div>
+    <p id="settingsNote"></p>
+  </div>
+
+  <div class="group">
+    <h2>envelope</h2>
+    <dl id="stats"></dl>
+  </div>
+
+  <div class="group" id="pickGroup" hidden>
+    <h2>selected cell</h2>
+    <dl id="pick"></dl>
+  </div>
+</div>
+
+<div id="status"></div>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+# Everything here is deployed to Linux. Shell scripts with CRLF line endings fail
+# in confusing ways — a stray carriage return in a shebang reports as
+# "command not found" — so line endings are normalised to LF on checkout
+# regardless of the platform anyone contributes from.
+* text=auto eol=lf
+
+*.png binary

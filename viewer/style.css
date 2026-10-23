@@ -1,0 +1,197 @@
+/* Monochrome, flat, same register as tar1090's dark theme. No gradients. */
+
+:root {
+  --bg: #0c0c0c;
+  --panel: #161616;
+  --line: #2c2c2c;
+  --line-bright: #3d3d3d;
+  --fg: #d8d8d8;
+  --fg-dim: #8a8a8a;
+  --fg-faint: #5f5f5f;
+  --accent: #6ba8df;
+  --mono: ui-monospace, "DejaVu Sans Mono", "Consolas", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font: 11px/1.45 var(--mono);
+  overflow: hidden;
+}
+
+/* The panel sits beside the view, not over it: a chart with axis labels hidden
+   under an overlay is worse than a slightly smaller chart. */
+#stage { position: absolute; inset: 0 0 0 206px; }
+
+#scene, #slice { display: block; width: 100%; height: 100%; }
+#scene[hidden], #slice[hidden] { display: none; }
+#slice { background: var(--bg); }
+
+#hint {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  color: var(--fg-faint);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+#panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 206px;
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.group { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.group:last-child { border-bottom: 0; }
+
+h2 {
+  margin: 0 0 5px;
+  font-size: 10px;
+  font-weight: normal;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
+label {
+  display: block;
+  padding: 2px 0;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+label:hover { color: var(--fg); }
+
+input[type="checkbox"] {
+  appearance: none;
+  width: 9px;
+  height: 9px;
+  margin: 0 6px 0 0;
+  border: 1px solid var(--line-bright);
+  background: transparent;
+  vertical-align: baseline;
+  cursor: pointer;
+}
+
+input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+
+label.slider { color: var(--fg-dim); }
+label.slider span { float: right; color: var(--fg); }
+
+input[type="range"] {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 12px;
+  margin: 2px 0 1px;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 1px;
+  background: var(--line-bright);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 3px;
+  height: 11px;
+  margin-top: -5px;
+  background: var(--fg);
+  border: 0;
+}
+
+input[type="range"]::-moz-range-track { height: 1px; background: var(--line-bright); }
+input[type="range"]::-moz-range-thumb {
+  width: 3px; height: 11px; border: 0; border-radius: 0; background: var(--fg);
+}
+
+label.field { display: flex; justify-content: space-between; align-items: center; }
+
+input[type="number"] {
+  width: 64px;
+  padding: 1px 4px;
+  color: var(--fg);
+  background: #0c0c0c;
+  border: 1px solid var(--line-bright);
+  font: inherit;
+  text-align: right;
+}
+
+.row { display: flex; gap: 4px; }
+
+button {
+  flex: 1;
+  padding: 4px 0;
+  color: var(--fg-dim);
+  background: #0f0f0f;
+  border: 1px solid var(--line-bright);
+  font: inherit;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+button:hover { color: var(--fg); border-color: var(--fg-faint); }
+button.on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
+
+#settingsNote {
+  margin: 4px 0 0;
+  min-height: 13px;
+  color: var(--fg-faint);
+}
+
+#altLegend {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1px 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#altLegend li { display: flex; align-items: center; color: var(--fg-dim); }
+
+#altLegend i {
+  width: 9px;
+  height: 9px;
+  margin-right: 5px;
+  flex: none;
+}
+
+dl { display: grid; grid-template-columns: auto 1fr; gap: 1px 8px; margin: 0; }
+dt { color: var(--fg-faint); }
+dd { margin: 0; text-align: right; color: var(--fg); overflow-wrap: anywhere; }
+
+#attribution {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  color: #4a4a4a;
+  pointer-events: none;
+}
+
+#status {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  padding: 3px 7px;
+  color: var(--fg-dim);
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+#status.error { color: #ff6a5e; border-color: #5a2a26; }

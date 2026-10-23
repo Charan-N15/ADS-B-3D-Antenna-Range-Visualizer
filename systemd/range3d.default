@@ -1,0 +1,26 @@
+# Settings for the ADS-B Antenna Range Visualizer collector.
+#
+# Apply changes with:  sudo systemctl restart range3d-collector
+#
+# install.sh never overwrites this file once it exists, so your settings survive
+# re-running the installer.
+
+# Where tar1090 serves its data from. The collector reads data/aircraft.json and
+# data/receiver.json under this URL.
+RANGE3D_BASE_URL="--base-url __BASE_URL__"
+
+# Where the coverage envelope is stored. This file is the only thing here that
+# cannot be regenerated — it is the record of everything the receiver has heard.
+RANGE3D_STATE="--state /var/lib/range3d/envelope.json"
+
+# Antenna height above sea level in feet: ground elevation plus mast height.
+#
+# This affects only the theoretical-horizon overlay, which shows how far you could
+# reach at a given altitude if geometry were the only limit. Measured coverage is
+# not affected by it. Uncomment and set it to something close to the truth.
+#RANGE3D_ANTENNA_FT="--rx-alt-ft 100"
+
+# How often to sample aircraft.json, and how often to write the envelope to disk.
+# One second matches how often readsb regenerates the file. Saving every 60 s keeps
+# writes off the SD card without risking much on an unclean shutdown.
+RANGE3D_COLLECT_OPTIONS="--interval 1 --save-every 60"

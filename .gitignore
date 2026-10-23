@@ -1,0 +1,10 @@
+# Map tiles are fetched, not authored: third-party raster data that install.sh
+# regenerates in one command. The vendored three.js is committed because it pins
+# behaviour; these do not.
+viewer/basemap/
+
+# Local envelope copies used by tools/devserver.py.
+data/
+
+__pycache__/
+*.pyc
