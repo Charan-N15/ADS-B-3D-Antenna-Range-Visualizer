@@ -8,6 +8,11 @@ Type=simple
 User=range3d
 Group=range3d
 EnvironmentFile=-/etc/default/range3d
+# If the defaults file is missing the options below expand to nothing and the
+# collector falls back to writing a relative path. Working from the state directory
+# means that lands somewhere writable rather than crash-looping against
+# ProtectSystem=strict.
+WorkingDirectory=/var/lib/range3d
 ExecStart=/usr/bin/python3 /usr/local/bin/range3d_collect.py \
   $RANGE3D_BASE_URL $RANGE3D_STATE $RANGE3D_ANTENNA_FT \
   collect $RANGE3D_COLLECT_OPTIONS
