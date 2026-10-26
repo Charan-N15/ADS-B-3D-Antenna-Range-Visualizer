@@ -8,3 +8,6 @@ data/
 
 __pycache__/
 *.pyc
+
+# Local dev server config for this checkout.
+.claude/

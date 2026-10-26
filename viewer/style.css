@@ -132,6 +132,20 @@ input[type="number"] {
   text-align: right;
 }
 
+.back {
+  display: block;
+  padding: 5px 0;
+  color: var(--fg-dim);
+  background: #0f0f0f;
+  border: 1px solid var(--line-bright);
+  font: inherit;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-decoration: none;
+}
+
+.back:hover { color: var(--fg); border-color: var(--fg-faint); }
+
 .row { display: flex; gap: 4px; }
 
 button {

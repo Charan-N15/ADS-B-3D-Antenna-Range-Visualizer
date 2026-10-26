@@ -19,6 +19,9 @@ import { SliceView } from './slice.js';
 const params = new URLSearchParams(location.search);
 const ENVELOPE_URL = params.get('envelope') || 'state/envelope.json';
 const AIRCRAFT_URL = params.get('aircraft') || '../tar1090/data/aircraft.json';
+// Where the "return to 2D" link goes. Relative by default, which is correct for the
+// standard install where the viewer sits beside tar1090 on the same host.
+const TAR1090_URL = params.get('tar1090') || '../tar1090/';
 const ENVELOPE_REFRESH_MS = 60000;
 const AIRCRAFT_REFRESH_MS = 1000;
 const CONTOUR_ALTITUDES = [2000, 5000, 10000, 20000, 30000, 40000];
@@ -450,6 +453,8 @@ function note(text) {
 }
 
 function wireUi() {
+  el('backTo2d').href = TAR1090_URL;
+
   for (const button of document.querySelectorAll('button.view')) {
     button.addEventListener('click', () => setView(button.dataset.view));
   }
