@@ -1,0 +1,7 @@
+.git
+.claude
+data/
+viewer/basemap/
+docs/
+**/__pycache__
+*.pyc
