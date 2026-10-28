@@ -34,7 +34,7 @@ This map shows coverage as volume in 3D space rather than a polygon in 2D space 
 
 - A working readsb or dump1090 receiver with tar1090 on top
 - A configured receiver position
-- systemd, lighttpd, and python3
+- systemd, lighttpd, and python3, or Docker (see [Docker](#docker))
 - An internet connection once to download map tiles
 
 ## Install
@@ -49,9 +49,85 @@ That reads your receiver position from tar1090, installs a collector service, do
 
 Then open `http://your-pi/range3d/`, or click the `3D` button in tar1090.
 
+## Docker
+
+If your receiver runs in Docker, such as the [sdr-enthusiasts ultrafeeder](https://github.com/sdr-enthusiasts/docker-adsb-ultrafeeder) stack, run range3d as a container next to it instead of using `install.sh`. One container runs the collector and serves the viewer, and it also proxies tar1090 so the viewer's live aircraft and `RETURN TO 2D` link work from the same address.
+
+Add it to the `docker-compose.yml` that runs tar1090:
+
+```yaml
+services:
+  range3d:
+    build: ./ADS-B-3D-Antenna-Range-Visualizer   # path to this repository
+    image: range3d:local
+    container_name: range3d
+    restart: unless-stopped
+    init: true
+    depends_on:
+      - ultrafeeder
+    ports:
+      - 8099:8080
+    environment:
+      - TAR1090_URL=http://ultrafeeder
+      - PUID=1000
+      - PGID=1000
+      - RANGE3D_ANTENNA_FT=120
+    volumes:
+      - ./range3d:/data
+```
+
+```bash
+docker compose up -d --build range3d
+```
+
+Then open `http://your-docker-host:8099/`.
+
+On first start the container:
+
+1. Seeds the envelope from tar1090's range outline.
+2. Downloads map tiles for your area into `/data/basemap`, in the background. Reload the page once the log says `fetched`.
+3. Starts collecting.
+
+Restarts and rebuilds keep everything in `/data`.
+
+### Settings
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `TAR1090_URL` | `http://ultrafeeder` | tar1090's base URL, reachable from the container. The collector reads `data/aircraft.json` under it. Use the compose service name, or a full URL such as `http://192.0.2.10/tar1090` for tar1090 on another host. |
+| `PUID` / `PGID` | `1000` / `1000` | Owner of the files in `/data`. The container starts as root only to `chown` `/data`, then runs as this user. |
+| `RANGE3D_ANTENNA_FT` | unset | Antenna height above sea level in feet (ground elevation plus mast). Only affects the theoretical-horizon overlay. If unset, the viewer assumes 100 ft. |
+| `FEEDER_ALT_M` | unset | The same in metres, used when `RANGE3D_ANTENNA_FT` is unset. The ultrafeeder example `.env` already defines it, so you can pass `FEEDER_ALT_M=${FEEDER_ALT_M}`. |
+| `RANGE3D_BASEMAP` | `1` | Set to `0` to skip downloading map tiles. |
+| `RANGE3D_RADIUS_NM` | `250` | Map radius around the receiver. |
+| `RANGE3D_ZOOM` | `8` | Map tile zoom level. 9 is four times the tiles and sharper close in. |
+| `RANGE3D_INTERVAL` | `1` | Seconds between `aircraft.json` polls. |
+| `RANGE3D_SAVE_EVERY` | `60` | Seconds between envelope saves. The envelope is also saved on `docker stop`. |
+
+### Data
+
+| Path | Contents |
+|---|---|
+| `/data/envelope.json` | The coverage envelope. This is the record of everything the receiver has heard and cannot be regenerated, so back it up. |
+| `/data/basemap/` | Map tiles. Delete this directory and restart to re-download, for example after changing `RANGE3D_ZOOM`. |
+
+### Endpoints
+
+| Path | Serves |
+|---|---|
+| `/` | The viewer. |
+| `/state/envelope.json` | The live envelope, uncached. |
+| `/tar1090/` | A pass-through to `TAR1090_URL`, so the full 2D map is also reachable here. |
+
+### Notes
+
+- The `3D` button inside tar1090 is not added, because tar1090's files belong to the other container. Open the viewer directly or bookmark it.
+- To move from a bare-metal install, copy `/var/lib/range3d/envelope.json` into the data directory before the first start. The container keeps an envelope it finds and never overwrites it.
+- To update, run `git pull`, then `docker compose up -d --build range3d`.
+
 ## Configuration
 
-Settings live in `/etc/default/range3d`. The one worth setting is your antenna's height above sea level:
+For an `install.sh` install, settings live in `/etc/default/range3d` (for Docker, see [Settings](#settings)). The one worth setting is your antenna's height above sea level:
 
 ```
 RANGE3D_ANTENNA_FT="--rx-alt-ft 120"
