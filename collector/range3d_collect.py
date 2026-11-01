@@ -9,6 +9,7 @@ Standard library only. Python 3.9+.
 """
 
 import argparse
+import array
 import gzip
 import json
 import math
@@ -51,6 +52,37 @@ def build_band_edges():
 
 BAND_EDGES = build_band_edges()
 N_BANDS = len(BAND_EDGES) - 1
+
+
+# --------------------------------------------------------------------- heatmap
+#
+# The envelope keeps only extremes, so it cannot answer "where does traffic
+# actually fly". That needs density, which is a second accumulator.
+#
+# Cartesian rather than polar: airways are straight lines, and a bearing/range
+# grid both curves them and changes resolution with distance — 1 degree is 0.1 nm
+# wide overhead and 4 nm wide at the edge. A square grid in nautical miles keeps
+# cells the same size everywhere and drops straight onto a texture.
+#
+# Coarse altitude bands. The envelope's 49 are for measuring a boundary precisely;
+# eight is plenty for showing where traffic sits, and keeps the grid 6x smaller.
+
+HEAT_BAND_EDGES = [0, 2000, 5000, 10000, 15000, 20000, 30000, 40000, 50000]
+HEAT_N_BANDS = len(HEAT_BAND_EDGES) - 1
+HEAT_CELL_NM = 2.0
+HEAT_HALF_NM = 300.0
+HEAT_SIZE = int(2 * HEAT_HALF_NM / HEAT_CELL_NM)    # 300 x 300 cells per band
+HEAT_MAX_COUNT = 65535                              # uint16 saturates here
+
+
+def heat_band_of(alt_ft):
+    """Index of the coarse heatmap altitude band, or None if out of range."""
+    if alt_ft < HEAT_BAND_EDGES[0] or alt_ft >= HEAT_BAND_EDGES[-1]:
+        return None
+    for i in range(HEAT_N_BANDS - 1, -1, -1):
+        if alt_ft >= HEAT_BAND_EDGES[i]:
+            return i
+    return None
 
 
 def band_of(alt_ft):
@@ -202,6 +234,117 @@ class Envelope:
         return added
 
 
+class Heatmap:
+    """Dense position-count grid: eight altitude bands of HEAT_SIZE^2 cells.
+
+    Stored as two files beside the envelope — a small JSON header and a raw
+    little-endian uint16 array — because a sparse JSON dict of this many cells
+    would be larger than the binary and far slower to parse in a browser. The
+    grid is mostly zeros, so it compresses to a fraction of its size in transit.
+    """
+
+    def __init__(self, rx_lat=None, rx_lon=None):
+        now = int(time.time())
+        self.rx = {"lat": rx_lat, "lon": rx_lon}
+        self.created = now
+        self.updated = now
+        self.samples = 0
+        self.cells = array.array("H", bytes(2 * HEAT_N_BANDS * HEAT_SIZE * HEAT_SIZE))
+        if self.cells.itemsize != 2:
+            raise SystemExit("this platform's array('H') is not 2 bytes wide")
+
+    @staticmethod
+    def paths(base):
+        return base + ".json", base + ".bin"
+
+    def meta(self):
+        return {
+            "version": 1,
+            "rx": self.rx,
+            "bandEdges": HEAT_BAND_EDGES,
+            "cellNm": HEAT_CELL_NM,
+            "halfNm": HEAT_HALF_NM,
+            "size": HEAT_SIZE,
+            "dtype": "uint16",
+            "byteOrder": "little",
+            "layout": "band, y (north up), x (east right)",
+            "created": self.created,
+            "updated": self.updated,
+            "samples": self.samples,
+        }
+
+    @classmethod
+    def load_or_new(cls, base, rx_lat=None, rx_lon=None):
+        meta_path, bin_path = cls.paths(base)
+        heat = cls(rx_lat, rx_lon)
+        if not (os.path.exists(meta_path) and os.path.exists(bin_path)):
+            return heat
+        with open(meta_path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        # Changing the grid would silently reinterpret every existing count, so
+        # refuse rather than corrupt a record that cannot be regenerated.
+        if (doc.get("bandEdges") != HEAT_BAND_EDGES
+                or doc.get("size") != HEAT_SIZE
+                or doc.get("cellNm") != HEAT_CELL_NM):
+            raise SystemExit(
+                "%s was written with a different heatmap grid. Move it aside to "
+                "start a new one." % meta_path)
+        with open(bin_path, "rb") as fh:
+            raw = fh.read()
+        if len(raw) != len(heat.cells) * 2:
+            raise SystemExit("%s is %d bytes, expected %d"
+                             % (bin_path, len(raw), len(heat.cells) * 2))
+        heat.cells = array.array("H")
+        heat.cells.frombytes(raw)
+        if sys.byteorder != "little":
+            heat.cells.byteswap()
+        heat.created = doc.get("created", heat.created)
+        heat.samples = doc.get("samples", 0)
+        if heat.rx.get("lat") is None:
+            heat.rx = doc.get("rx", heat.rx)
+        return heat
+
+    def record(self, az_deg, range_nm, alt_ft):
+        """Count one accepted position. Returns True if it landed on the grid."""
+        band = heat_band_of(alt_ft)
+        if band is None:
+            return False
+        a = math.radians(az_deg)
+        xi = int((range_nm * math.sin(a) + HEAT_HALF_NM) / HEAT_CELL_NM)
+        yi = int((range_nm * math.cos(a) + HEAT_HALF_NM) / HEAT_CELL_NM)
+        if not (0 <= xi < HEAT_SIZE and 0 <= yi < HEAT_SIZE):
+            return False
+        i = (band * HEAT_SIZE + yi) * HEAT_SIZE + xi
+        if self.cells[i] < HEAT_MAX_COUNT:
+            self.cells[i] += 1
+        self.samples += 1
+        return True
+
+    def save(self, base):
+        """Atomic for both files; the header is written last so a reader never
+        sees a header that claims more than the array holds."""
+        meta_path, bin_path = self.paths(base)
+        self.updated = int(time.time())
+        os.makedirs(os.path.dirname(os.path.abspath(base)), exist_ok=True)
+
+        payload = self.cells
+        if sys.byteorder != "little":
+            payload = array.array("H", self.cells)
+            payload.byteswap()
+        tmp_bin = bin_path + ".tmp"
+        with open(tmp_bin, "wb") as fh:
+            fh.write(payload.tobytes())
+        os.replace(tmp_bin, bin_path)
+
+        tmp_meta = meta_path + ".tmp"
+        with open(tmp_meta, "w", encoding="utf-8") as fh:
+            json.dump(self.meta(), fh, separators=(",", ":"))
+        os.replace(tmp_meta, meta_path)
+
+    def filled(self):
+        return sum(1 for v in self.cells if v)
+
+
 def accept(ac, now, last_fix, rx):
     """Filter and normalize one aircraft entry.
 
@@ -270,6 +413,20 @@ def accept(ac, now, last_fix, rx):
     return az_bin, band, range_nm, int(fix_t), rec
 
 
+def heatmap_base(args):
+    """Path prefix for heatmap.json/.bin, or None when disabled.
+
+    Defaults to sitting beside the envelope, so an existing install picks the
+    heatmap up on upgrade with no configuration change — and the web server
+    alias that already serves the state directory serves it too.
+    """
+    if getattr(args, "no_heatmap", False):
+        return None
+    if getattr(args, "heatmap", None):
+        return args.heatmap
+    return os.path.join(os.path.dirname(os.path.abspath(args.state)), "heatmap")
+
+
 def cmd_collect(args):
     base = args.base_url.rstrip("/")
     rx_lat = rx_lon = None
@@ -284,6 +441,16 @@ def cmd_collect(args):
     env = Envelope.load_or_new(args.state, rx_lat, rx_lon, args.rx_alt_ft)
     print("state %s: %d cells, %d samples"
           % (args.state, len(env.cells), env.samples), flush=True)
+
+    # The heatmap is written far less often than the envelope: it is a fixed
+    # 1.4 MB regardless of content, and rewriting that every minute is pointless
+    # churn on an SD card for a layer nobody watches second by second.
+    heat = None
+    heat_base = heatmap_base(args)
+    if heat_base:
+        heat = Heatmap.load_or_new(heat_base, rx_lat, rx_lon)
+        print("heatmap %s.bin: %d cells filled, %d samples"
+              % (heat_base, heat.filled(), heat.samples), flush=True)
 
     last_fix = {}
     stopping = {"now": False}
@@ -300,6 +467,7 @@ def cmd_collect(args):
 
     url = base + "/data/aircraft.json"
     last_save = time.time()
+    last_heat_save = time.time()
     backoff = 1.0
     records = 0
     deadline = time.time() + args.duration if args.duration else None
@@ -324,6 +492,10 @@ def cmd_collect(args):
             last_fix[rec["hex"]] = now - ac["seen_pos"]
             if env.record(az_bin, band, range_nm, fix_t, rec):
                 records += 1
+            if heat is not None:
+                # The exact bearing, not the 1-degree bin: the grid is Cartesian
+                # and rounding to a bin here would quantise paths into spokes.
+                heat.record(ac.get("r_dir", az_bin), range_nm, rec["alt"])
 
         # Aircraft go away; their dedupe entries should not accumulate forever.
         if len(last_fix) > 4000:
@@ -336,6 +508,12 @@ def cmd_collect(args):
             print("saved: %d cells, %d samples, %d records set"
                   % (len(env.cells), env.samples, records), flush=True)
 
+        if heat is not None and time.time() - last_heat_save >= args.heatmap_every:
+            heat.save(heat_base)
+            last_heat_save = time.time()
+            print("heatmap saved: %d cells filled, %d samples"
+                  % (heat.filled(), heat.samples), flush=True)
+
         if deadline and time.time() >= deadline:
             break
 
@@ -344,7 +522,12 @@ def cmd_collect(args):
             time.sleep(args.interval - elapsed)
 
     env.save(args.state)
-    print("stopped: %d cells, %d samples" % (len(env.cells), env.samples), flush=True)
+    if heat is not None:
+        heat.save(heat_base)
+    print("stopped: %d cells, %d samples%s"
+          % (len(env.cells), env.samples,
+             "" if heat is None else ", heatmap %d samples" % heat.samples),
+          flush=True)
     return 0
 
 
@@ -455,6 +638,23 @@ def cmd_stats(args):
             theory = theoretical_range_nm(rx_alt, lo)
             line += "  %9.1f  %6.0f%%" % (theory, 100.0 * max(covered) / theory)
         print(line)
+
+    base = heatmap_base(args)
+    if base and os.path.exists(base + ".bin"):
+        heat = Heatmap.load_or_new(base)
+        total = HEAT_N_BANDS * HEAT_SIZE * HEAT_SIZE
+        print()
+        print("heatmap  %d of %d cells (%.1f%%), %s positions"
+              % (heat.filled(), total, 100.0 * heat.filled() / total,
+                 f"{heat.samples:,}"))
+        print("  band             cells   busiest cell")
+        for b in range(HEAT_N_BANDS):
+            lo, hi = HEAT_BAND_EDGES[b], HEAT_BAND_EDGES[b + 1]
+            start = b * HEAT_SIZE * HEAT_SIZE
+            chunk = heat.cells[start:start + HEAT_SIZE * HEAT_SIZE]
+            filled = sum(1 for v in chunk if v)
+            if filled:
+                print("  %5d-%-5d  %10d   %12d" % (lo, hi, filled, max(chunk)))
     return 0
 
 
@@ -466,11 +666,19 @@ def main(argv=None):
                         help="envelope state file (default: %(default)s)")
     parser.add_argument("--rx-alt-ft", type=float, default=None,
                         help="antenna height above sea level, feet")
+    parser.add_argument("--heatmap", default=None,
+                        help="path prefix for heatmap.json/.bin "
+                             "(default: beside --state)")
+    parser.add_argument("--no-heatmap", action="store_true",
+                        help="do not accumulate the traffic density heatmap")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     collect = sub.add_parser("collect", help="poll aircraft.json and accumulate")
     collect.add_argument("--interval", type=float, default=1.0)
     collect.add_argument("--save-every", type=float, default=60.0)
+    collect.add_argument("--heatmap-every", type=float, default=300.0,
+                         help="seconds between heatmap saves (default: "
+                              "%(default)s; it is a fixed 1.4 MB each time)")
     collect.add_argument("--duration", type=float, default=None,
                          help="stop after N seconds (for testing)")
     collect.set_defaults(func=cmd_collect)
