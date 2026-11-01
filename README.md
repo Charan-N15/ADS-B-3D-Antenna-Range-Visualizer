@@ -21,11 +21,11 @@ This shows coverage as a volume rather than a polygon, so you can actually see t
 
 ## Modes
 
-**Orbit** — the envelope as a surface you can spin.
+**Orbit**: the envelope as a surface you can spin.
 
-**Top** — straight down, as you would in tar1090.
+**Top**: straight down.
 
-**Slice** — a vertical cross-section along a bearing you pick, split into coverage you have confirmed, coverage that is geometrically possible but unachieved, and everything below the horizon. The gap in the middle is your headroom.
+**Slice** — a vertical cross-section.
 
 ## Requirements
 
@@ -45,7 +45,7 @@ It reads your receiver position from tar1090, installs a collector service, down
 
 Then open `http://your-pi/range3d/`.
 
-The envelope starts empty and fills as aircraft fly through it — high altitude within hours, low altitude over days.
+The envelope starts empty, and your antenna range will carve itself out over a few days, once you receive enough data from aircraft.
 
 ## Docker
 
@@ -73,30 +73,13 @@ docker compose up -d --build range3d
 
 Then open `http://your-docker-host:8099/`. It seeds from tar1090's range outline, downloads map tiles in the background, and keeps everything in `/data` across restarts and rebuilds.
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `TAR1090_URL` | `http://ultrafeeder` | tar1090's base URL as seen from the container. A compose service name, or something like `http://192.0.2.10/tar1090` for tar1090 on another host. |
-| `RANGE3D_ANTENNA_FT` | unset | Antenna height above sea level in feet. Only affects the theoretical horizon overlay. |
-| `FEEDER_ALT_M` | unset | The same in metres, so ultrafeeder's `.env` value can be passed straight through. |
-| `PUID` / `PGID` | `1000` | Owner of `/data`. The container starts as root only to chown it, then drops to this user. |
+Settings are listed at the top of `docker/entrypoint.sh`.
 
-The remaining settings are listed at the top of `docker/entrypoint.sh`.
-
-The `3D` button is not added in this mode, because tar1090's files belong to the other container — bookmark the viewer instead. To move an existing bare-metal install across, copy `/var/lib/range3d/envelope.json` into the data directory before the first start and it will be kept.
+The `3D` button is not added in this mode, because tar1090's files belong to the other container. To move an existing bare-metal install across, copy `/var/lib/range3d/envelope.json` into the data directory before the first start and it will be kept.
 
 ## Configuration
 
-For an `install.sh` install, settings live in `/etc/default/range3d`. The one worth setting is your antenna's height above sea level:
-
-```
-RANGE3D_ANTENNA_FT="--rx-alt-ft 120"
-```
-
-It only affects the theoretical horizon overlay. Restart after editing:
-
-```bash
-sudo systemctl restart range3d-collector
-```
+For an `install.sh` install, settings live in `/etc/default/range3d`.
 
 ## Updating
 
