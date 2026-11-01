@@ -25,6 +25,7 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -70,6 +71,9 @@ def bounding_box(lat, lon, radius_nm):
 
 
 def fetch(url, timeout=20.0):
+    scheme = urllib.parse.urlsplit(url).scheme
+    if scheme not in ("http", "https"):
+        raise ValueError("refusing to fetch %r: scheme must be http or https" % url)
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read()
