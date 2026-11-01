@@ -25,7 +25,7 @@ This shows coverage as a volume rather than a polygon, so you can actually see t
 
 **Top**: straight down.
 
-**Slice** — a vertical cross-section.
+**Slice**: a vertical cross-section.
 
 ## Requirements
 
