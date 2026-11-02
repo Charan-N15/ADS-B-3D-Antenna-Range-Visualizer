@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>range3d — terminal vs not</title>
+<style>
+body{margin:0;background:#070707;color:#d8d8d8;
+  font:11px/1.45 ui-monospace,"DejaVu Sans Mono",Consolas,monospace}
+.strip{display:flex;gap:14px;padding:12px;align-items:flex-start}
+.spec{width:250px}
+.spec > b{display:block;font-weight:400;color:#d8d8d8;padding:0 0 3px 2px;letter-spacing:.06em}
+.spec > em{display:block;font-style:normal;color:#6f6f6f;padding:0 0 8px 2px;line-height:1.5}
+.mono{font-family:ui-monospace,"DejaVu Sans Mono",Consolas,monospace}
+
+/* ================= A — your picks: boxed, neutral, sans labels ============ */
+.A{--panel:#1e1e1e;--raise:#1e1e1e;--fg:#f0f0f0;--dim:#bcbcbc;--faint:#9a9a9a;
+   --line:#3a3a3a;--ctl:#696969;--accent:#e9e9e9;
+   width:206px;background:var(--panel);border:1px solid var(--line);padding:8px;
+   font:12px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+.A h2{margin:0 0 5px;font-size:10px;font-weight:400;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--accent);font-family:ui-monospace,monospace}
+.A .grp{border:1px solid var(--line);padding:7px 8px;margin-bottom:8px}
+.A .grp:last-child{margin-bottom:0}
+.A label{display:block;padding:2px 0;color:var(--dim)}
+.A .ck{display:inline-block;width:10px;height:10px;margin-right:7px;
+  border:1px solid var(--ctl);vertical-align:baseline}
+.A .ck.on{background:var(--accent);border-color:var(--accent)}
+.A .val{float:right;color:var(--fg);font-family:ui-monospace,monospace;font-size:11px}
+.A .sld{display:block;height:1px;background:var(--ctl);margin:7px 0 3px;position:relative}
+.A .sld::after{content:"";position:absolute;left:38%;top:-5px;width:3px;height:11px;background:var(--fg)}
+.A .fld{display:flex;justify-content:space-between;align-items:center;padding:3px 0;color:var(--dim)}
+.A .fld b{font-weight:400;font-family:ui-monospace,monospace;font-size:11px;color:var(--fg);
+  background:#121212;border:1px solid var(--ctl);padding:2px 6px;min-width:64px;text-align:right}
+.A .btn{display:block;width:100%;margin-top:6px;padding:5px 0;text-align:center;color:var(--dim);
+  background:rgba(0,0,0,.3);border:1px solid var(--ctl);letter-spacing:.06em;
+  font-family:ui-monospace,monospace;font-size:11px}
+
+/* ================= B — modern dark app ==================================== */
+.B{--panel:#16181c;--raise:#1e2126;--fg:#eceef1;--dim:#a9b0b9;--faint:#79818c;
+   --line:#2a2e35;--ctl:#3a3f47;--accent:#e9e9e9;
+   width:226px;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+   padding:12px;font:13px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+.B h2{margin:0 0 8px;font-size:12px;font-weight:500;color:var(--fg);letter-spacing:0}
+.B .grp{background:var(--raise);border-radius:7px;padding:10px 11px;margin-bottom:9px}
+.B .grp:last-child{margin-bottom:0}
+.B label{display:flex;align-items:center;justify-content:space-between;
+  padding:5px 0;color:var(--dim)}
+.B .sw{width:26px;height:15px;border-radius:8px;background:var(--ctl);position:relative;flex:none}
+.B .sw::after{content:"";position:absolute;top:2px;left:2px;width:11px;height:11px;
+  border-radius:50%;background:#8b929c}
+.B .sw.on{background:var(--accent)}
+.B .sw.on::after{left:13px;background:#16181c}
+.B .val{color:var(--fg);font-family:ui-monospace,monospace;font-size:12px}
+.B .sld{display:block;height:3px;border-radius:2px;background:var(--ctl);margin:9px 0 4px;position:relative}
+.B .sld::after{content:"";position:absolute;left:38%;top:-4px;width:11px;height:11px;
+  border-radius:50%;background:var(--accent)}
+.B .fld{display:flex;justify-content:space-between;align-items:center;padding:5px 0;color:var(--dim)}
+.B .fld b{font-weight:400;font-family:ui-monospace,monospace;font-size:12px;color:var(--fg);
+  background:#101216;border:1px solid var(--ctl);border-radius:5px;padding:4px 8px;
+  min-width:66px;text-align:right}
+.B .btn{display:block;width:100%;margin-top:8px;padding:7px 0;text-align:center;
+  color:#16181c;background:var(--accent);border:0;border-radius:6px;font-size:12px;font-weight:500}
+
+/* ================= C — soft minimal, no boxes ============================= */
+.C{--panel:#131417;--fg:#f2f3f5;--dim:#aab0b8;--faint:#767c85;--line:#24272c;
+   --ctl:#3c414a;--accent:#e9e9e9;
+   width:226px;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+   padding:14px;font:13px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}
+.C h2{margin:0 0 2px;font-size:13px;font-weight:500;color:var(--fg)}
+.C .sub{margin:0 0 9px;font-size:11px;color:var(--faint)}
+.C .grp{margin-bottom:16px}
+.C .grp:last-child{margin-bottom:0}
+.C label{display:flex;align-items:center;justify-content:space-between;padding:4px 0;color:var(--dim)}
+.C .sw{width:26px;height:15px;border-radius:8px;background:var(--ctl);position:relative;flex:none}
+.C .sw::after{content:"";position:absolute;top:2px;left:2px;width:11px;height:11px;
+  border-radius:50%;background:#878d96}
+.C .sw.on{background:var(--accent)}
+.C .sw.on::after{left:13px;background:#131417}
+.C .val{color:var(--fg);font-family:ui-monospace,monospace;font-size:12px}
+.C .sld{display:block;height:3px;border-radius:2px;background:var(--ctl);margin:8px 0 2px;position:relative}
+.C .sld::after{content:"";position:absolute;left:38%;top:-4px;width:11px;height:11px;
+  border-radius:50%;background:var(--accent)}
+.C .fld{display:flex;justify-content:space-between;align-items:center;padding:4px 0;color:var(--dim)}
+.C .fld b{font-weight:400;font-family:ui-monospace,monospace;font-size:12px;color:var(--fg);
+  background:transparent;border:0;border-bottom:1px solid var(--ctl);padding:2px 2px;
+  min-width:62px;text-align:right}
+.C .btn{display:block;width:100%;margin-top:8px;padding:6px 0;text-align:center;color:var(--fg);
+  background:transparent;border:1px solid var(--ctl);border-radius:6px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="strip">
+
+  <div class="spec">
+    <b>A &mdash; YOUR PICKS</b>
+    <em>neutral accent, boxed groups, sans labels with mono numbers. still reads as an instrument.</em>
+    <div class="A">
+      <div class="grp">
+        <h2>view</h2>
+        <label><span><i class="ck on"></i>earth curvature</span></label>
+        <label><span><i class="ck on"></i>colour by altitude</span></label>
+        <label><span><i class="ck on"></i>altitude closure</span></label>
+        <label>vertical <span class="val">8&times;</span><i class="sld"></i></label>
+        <label>smooth <span class="val">5&deg;</span><i class="sld"></i></label>
+        <div class="fld">antenna ft <b>120</b></div>
+      </div>
+      <div class="grp">
+        <h2>altitude filter</h2>
+        <div class="fld">from ft <b>0</b></div>
+        <div class="fld">to ft <b>50000</b></div>
+        <span class="btn">SHOW ALL</span>
+      </div>
+      <div class="grp">
+        <h2>envelope</h2>
+        <div class="fld">positions <span class="val">4,225,131</span></div>
+        <div class="fld">max range <span class="val">142.1 nm</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="spec">
+    <b>B &mdash; MODERN DARK</b>
+    <em>sans throughout, sentence case, rounded cards, switches instead of boxes. reads like a settings pane.</em>
+    <div class="B">
+      <div class="grp">
+        <h2>View</h2>
+        <label>Earth curvature <i class="sw on"></i></label>
+        <label>Colour by altitude <i class="sw on"></i></label>
+        <label>Altitude closure <i class="sw on"></i></label>
+        <label>Vertical <span class="val">8&times;</span></label><i class="sld"></i>
+        <label>Smooth <span class="val">5&deg;</span></label><i class="sld"></i>
+        <div class="fld">Antenna ft <b>120</b></div>
+      </div>
+      <div class="grp">
+        <h2>Altitude filter</h2>
+        <div class="fld">From ft <b>0</b></div>
+        <div class="fld">To ft <b>50000</b></div>
+        <span class="btn">Show all</span>
+      </div>
+      <div class="grp">
+        <h2>Envelope</h2>
+        <div class="fld">Positions <span class="val">4,225,131</span></div>
+        <div class="fld">Max range <span class="val">142.1 nm</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="spec">
+    <b>C &mdash; SOFT MINIMAL</b>
+    <em>no boxes at all. hierarchy from size, weight and whitespace. roomiest, takes the most width.</em>
+    <div class="C">
+      <div class="grp">
+        <h2>View</h2>
+        <p class="sub">How the envelope is drawn</p>
+        <label>Earth curvature <i class="sw on"></i></label>
+        <label>Colour by altitude <i class="sw on"></i></label>
+        <label>Altitude closure <i class="sw on"></i></label>
+        <label>Vertical <span class="val">8&times;</span></label><i class="sld"></i>
+      </div>
+      <div class="grp">
+        <h2>Altitude filter</h2>
+        <p class="sub">Show only this slice</p>
+        <div class="fld">From ft <b>0</b></div>
+        <div class="fld">To ft <b>50000</b></div>
+        <span class="btn">Show all</span>
+      </div>
+      <div class="grp">
+        <h2>Envelope</h2>
+        <p class="sub">Collected over 10.6 days</p>
+        <div class="fld">Positions <span class="val">4,225,131</span></div>
+        <div class="fld">Max range <span class="val">142.1 nm</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
