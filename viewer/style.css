@@ -84,16 +84,26 @@ html, body {
 
 /* ----------------------------------------------------------------- panel */
 
+/* Body scrolls, footer does not: save and reset stay reachable from every
+   section without being repeated in each one. */
 #panel {
   width: var(--panel-w);
   flex: none;
-  padding: 8px;
+  display: flex;
+  flex-direction: column;
   background: var(--panel);
   border-right: 1px solid var(--line);
-  overflow-y: auto;
 }
 
 #panel.collapsed { display: none; }
+
+#panelBody { flex: 1; min-height: 0; overflow-y: auto; padding: 8px; }
+
+#panelFooter {
+  flex: none;
+  padding: 6px 8px 8px;
+  border-top: 1px solid var(--line);
+}
 
 #panel section > h2:first-child { margin-top: 0; }
 
@@ -129,12 +139,6 @@ label {
 
 label:hover { color: var(--fg); }
 label.sub { padding-left: 15px; }
-
-.note {
-  margin: 6px 0 0;
-  color: var(--fg-faint);
-  line-height: 1.5;
-}
 
 input[type="checkbox"] {
   appearance: none;
@@ -198,7 +202,11 @@ button {
 
 button:hover { color: var(--fg); border-color: var(--fg-faint); }
 
-#settingsNote { min-height: 13px; }
+#settingsNote {
+  margin: 4px 0 0;
+  min-height: 13px;
+  color: var(--fg-faint);
+}
 
 #altLegend {
   display: grid;

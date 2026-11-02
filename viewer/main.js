@@ -348,6 +348,11 @@ function frameCamera() {
 
 /** Shows one rail section in the panel and lights its rail button. */
 function showSection(name) {
+  // Settings saved by an earlier build can name a section that has since been
+  // merged away; without this the panel would come up blank.
+  if (!document.querySelector(`#panel section[data-sect="${name}"]`)) {
+    name = 'layers';
+  }
   ui.section = name;
   for (const node of document.querySelectorAll('#panel section')) {
     node.hidden = node.dataset.sect !== name;

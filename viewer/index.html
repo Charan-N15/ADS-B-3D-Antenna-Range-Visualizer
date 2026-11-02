@@ -38,17 +38,9 @@
       <svg viewBox="0 0 18 18"><path d="M9 2 L16 6 L9 10 L2 6 Z"/><path d="M2 10 L9 14 L16 10"/></svg>
       <span>layers</span>
     </button>
-    <button class="rail-btn sect" data-sect="filter" title="Altitude filter">
-      <svg viewBox="0 0 18 18"><path d="M2 4.5h14M4.5 9h9M7 13.5h4"/></svg>
-      <span>filter</span>
-    </button>
-    <button class="rail-btn sect" data-sect="view" title="View">
-      <svg viewBox="0 0 18 18"><path d="M1 9 Q9 2.5 17 9 Q9 15.5 1 9 Z"/><circle cx="9" cy="9" r="2.3"/></svg>
-      <span>view</span>
-    </button>
-    <button class="rail-btn sect" data-sect="tune" title="Tuning">
+    <button class="rail-btn sect" data-sect="view" title="View and tuning">
       <svg viewBox="0 0 18 18"><path d="M2.5 5h13M2.5 9h13M2.5 13h13"/><circle cx="6" cy="5" r="1.8"/><circle cx="12" cy="9" r="1.8"/><circle cx="7.5" cy="13" r="1.8"/></svg>
-      <span>tune</span>
+      <span>view</span>
     </button>
     <button class="rail-btn sect" data-sect="info" title="Envelope info">
       <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><path d="M9 8.2v4.6M9 5.4v.6"/></svg>
@@ -64,81 +56,75 @@
   </nav>
 
   <aside id="panel">
+    <div id="panelBody">
 
-    <section data-sect="layers">
-      <h2>layers</h2>
-      <label><input type="checkbox" id="layerEnvelope" checked> envelope surface</label>
-      <label><input type="checkbox" id="layerContours" checked> altitude rings</label>
-      <label><input type="checkbox" id="layerHorizon" checked> theoretical horizon</label>
-      <label class="sub"><input type="checkbox" id="extendHorizon"> extend to top</label>
-      <label><input type="checkbox" id="layerFootprint"> ground footprint</label>
-      <label><input type="checkbox" id="layerAircraft" checked> live traffic</label>
-      <label><input type="checkbox" id="layerGround" checked> range rings</label>
-      <label><input type="checkbox" id="layerBasemap" checked> map</label>
-      <label class="slider">map level <span id="mapOpacityOut">75%</span>
-        <input type="range" id="mapOpacity" min="0" max="100" step="5" value="75"></label>
+      <section data-sect="layers">
+        <h2>layers</h2>
+        <label><input type="checkbox" id="layerEnvelope" checked> envelope surface</label>
+        <label><input type="checkbox" id="layerContours" checked> altitude rings</label>
+        <label><input type="checkbox" id="layerHorizon" checked> theoretical horizon</label>
+        <label class="sub"><input type="checkbox" id="extendHorizon"> extend to top</label>
+        <label><input type="checkbox" id="layerFootprint"> ground footprint</label>
+        <label><input type="checkbox" id="layerAircraft" checked> live traffic</label>
+        <label><input type="checkbox" id="layerGround" checked> range rings</label>
+        <label><input type="checkbox" id="layerBasemap" checked> map</label>
+        <label class="slider">map level <span id="mapOpacityOut">75%</span>
+          <input type="range" id="mapOpacity" min="0" max="100" step="5" value="75"></label>
 
-      <div id="altLegendGroup">
-        <h2>altitude</h2>
-        <ul id="altLegend"></ul>
-      </div>
-    </section>
+        <div id="altLegendGroup">
+          <h2>altitude</h2>
+          <ul id="altLegend"></ul>
+        </div>
+      </section>
 
-    <section data-sect="filter" hidden>
-      <h2>altitude filter</h2>
-      <label class="field">from ft
-        <input type="number" id="altMin" min="0" max="50000" step="500" value="0"></label>
-      <label class="field">to ft
-        <input type="number" id="altMax" min="0" max="50000" step="500" value="50000"></label>
-      <div class="row"><button id="altReset">SHOW ALL</button></div>
-      <p class="note">Cuts the envelope to that shell and hides traffic outside it.</p>
-    </section>
+      <section data-sect="view" hidden>
+        <h2>view</h2>
+        <label><input type="checkbox" id="curvature" checked> earth curvature</label>
+        <label><input type="checkbox" id="colorByAlt" checked> colour by altitude</label>
+        <label><input type="checkbox" id="closure" checked> altitude closure</label>
+        <label class="slider">vertical <span id="exagOut">8&times;</span>
+          <input type="range" id="exag" min="1" max="24" step="1" value="8"></label>
+        <label class="slider">smooth <span id="smoothOut">5&deg;</span>
+          <input type="range" id="smooth" min="1" max="15" step="2" value="5"></label>
+        <label class="slider">min hits <span id="hitsOut">2</span>
+          <input type="range" id="hits" min="1" max="6" step="1" value="2"></label>
+        <label class="field">antenna ft
+          <input type="number" id="rxAlt" min="0" max="10000" step="10" value="100"></label>
 
-    <section data-sect="view" hidden>
-      <h2>view</h2>
-      <label class="slider">vertical <span id="exagOut">8&times;</span>
-        <input type="range" id="exag" min="1" max="24" step="1" value="8"></label>
-      <label><input type="checkbox" id="curvature" checked> earth curvature</label>
-      <label><input type="checkbox" id="colorByAlt" checked> colour by altitude</label>
+        <h2>altitude filter</h2>
+        <label class="field">from ft
+          <input type="number" id="altMin" min="0" max="50000" step="500" value="0"></label>
+        <label class="field">to ft
+          <input type="number" id="altMax" min="0" max="50000" step="500" value="50000"></label>
+        <div class="row"><button id="altReset">SHOW ALL</button></div>
 
-      <div id="sliceControls" hidden>
-        <h2>slice</h2>
-        <label class="slider">bearing <span id="azOut">000&deg;</span>
-          <input type="range" id="sliceAz" min="0" max="359" step="1" value="0"></label>
-        <label class="slider">spread <span id="spreadOut">&plusmn;5&deg;</span>
-          <input type="range" id="sliceSpread" min="0" max="30" step="1" value="5"></label>
-      </div>
+        <div id="sliceControls" hidden>
+          <h2>slice</h2>
+          <label class="slider">bearing <span id="azOut">000&deg;</span>
+            <input type="range" id="sliceAz" min="0" max="359" step="1" value="0"></label>
+          <label class="slider">spread <span id="spreadOut">&plusmn;5&deg;</span>
+            <input type="range" id="sliceSpread" min="0" max="30" step="1" value="5"></label>
+        </div>
+      </section>
 
-      <h2>saved view</h2>
+      <section data-sect="info" hidden>
+        <h2>envelope</h2>
+        <dl id="stats"></dl>
+        <div id="pickGroup" hidden>
+          <h2>selected cell</h2>
+          <dl id="pick"></dl>
+        </div>
+      </section>
+
+    </div>
+
+    <div id="panelFooter">
       <div class="row">
         <button id="saveSettings">SAVE VIEW</button>
         <button id="resetSettings">RESET</button>
       </div>
-      <p id="settingsNote" class="note"></p>
-    </section>
-
-    <section data-sect="tune" hidden>
-      <h2>tuning</h2>
-      <label class="slider">smooth <span id="smoothOut">5&deg;</span>
-        <input type="range" id="smooth" min="1" max="15" step="2" value="5"></label>
-      <label class="slider">min hits <span id="hitsOut">2</span>
-        <input type="range" id="hits" min="1" max="6" step="1" value="2"></label>
-      <label><input type="checkbox" id="closure" checked> altitude closure</label>
-      <label class="field">antenna ft
-        <input type="number" id="rxAlt" min="0" max="10000" step="10" value="100"></label>
-      <p class="note">Antenna height only moves the theoretical horizon. Measured
-        coverage is unaffected.</p>
-    </section>
-
-    <section data-sect="info" hidden>
-      <h2>envelope</h2>
-      <dl id="stats"></dl>
-      <div id="pickGroup" hidden>
-        <h2>selected cell</h2>
-        <dl id="pick"></dl>
-      </div>
-    </section>
-
+      <p id="settingsNote"></p>
+    </div>
   </aside>
 
   <button id="panelToggle" title="Collapse the panel">&#8249;</button>
