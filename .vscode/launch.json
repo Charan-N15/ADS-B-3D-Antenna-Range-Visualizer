@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Dev server (live reload)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tools/devserver.py",
+      "args": ["--receiver", "http://adsbpi/tar1090"],
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}
