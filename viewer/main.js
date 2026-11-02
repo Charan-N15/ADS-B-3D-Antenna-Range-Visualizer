@@ -285,13 +285,15 @@ function renderStats() {
   if (!model) return;
   const s = summarize(model, ui.minHits);
   const days = Math.max(0, (s.updated - s.created) / 86400);
+  // How long it has been collecting sits under the heading rather than in the
+  // list: none of the other numbers mean anything without it.
+  el('collectedSince').textContent = `Collected over ${days.toFixed(1)} days`;
   defList(el('stats'), [
     ['cells', `${s.filled} / ${s.cells}`],
     ['bearings', `${s.bearings} / 360`],
     ['positions', s.samples.toLocaleString()],
     ['max range', `${s.maxRangeNm.toFixed(1)} nm`],
     ['at', `${String(s.maxRangeAz).padStart(3, '0')}° / ${s.maxRangeAltFt.toLocaleString()} ft`],
-    ['collecting', `${days.toFixed(1)} d`],
     ['updated', fmtTime(s.updated)],
   ]);
 }

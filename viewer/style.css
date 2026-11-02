@@ -1,18 +1,43 @@
-/* Monochrome, flat, same register as tar1090's dark theme. No gradients. */
+/* Every design decision lives in this block. Adding a second look later means
+   adding a second :root[data-theme=...] here, not editing the rules below. */
 
 :root {
-  --bg: #0c0c0c;
-  --panel: #161616;
-  --rail: #101010;
-  --line: #2c2c2c;
-  --line-bright: #3d3d3d;
-  --fg: #d8d8d8;
-  --fg-dim: #8a8a8a;
-  --fg-faint: #5f5f5f;
-  --accent: #6ba8df;
+  /* surfaces */
+  --bg: #0b0b0d;
+  --panel: #131417;
+  --rail: #0f1012;
+  --sunken: #0e0f12;
+
+  /* ink. --faint is the one that used to fail contrast; it carries headings,
+     rail labels, the hint line and every dt, so it is held above 4.5:1. */
+  --fg: #f2f3f5;
+  --dim: #aab0b8;
+  --faint: #767c85;
+
+  /* lines. --line is decorative separation, --ctl outlines real controls and
+     is held above 3:1 so an unchecked control is visible. */
+  --line: #24272c;
+  --ctl: #3c414a;
+
+  /* one accent. Chosen to sit well clear of the altitude ramp: it is roughly
+     twice as far from the 2k band colour as the band colours are from each
+     other, so it reads as chrome rather than as data. */
+  --accent: #f2c57c;
+  --knob: #878d96;
+
+  /* type: sans for labels, mono wherever digits need to line up */
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "DejaVu Sans Mono", "Consolas", monospace;
-  --rail-w: 54px;
-  --panel-w: 198px;
+  --size: 13px;
+  --size-num: 12px;
+  --size-small: 11px;
+
+  /* shape and rhythm */
+  --radius: 8px;
+  --radius-sm: 5px;
+  --pad: 10px;
+  --rail-w: 58px;
+  --panel-w: 226px;
 }
 
 * { box-sizing: border-box; }
@@ -22,12 +47,10 @@ html, body {
   height: 100%;
   background: var(--bg);
   color: var(--fg);
-  font: 11px/1.45 var(--mono);
+  font: var(--size)/1.6 var(--sans);
   overflow: hidden;
 }
 
-/* Rail, panel, toggle and stage in one row. The stage takes what is left, so
-   collapsing the panel widens the view with no positioning maths. */
 #shell { display: flex; height: 100%; }
 
 /* ------------------------------------------------------------------ rail */
@@ -39,30 +62,31 @@ html, body {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 6px 0;
+  padding: 7px 0;
   background: var(--rail);
   border-right: 1px solid var(--line);
   overflow-y: auto;
 }
 
 #rail hr {
-  width: 60%;
+  width: 56%;
   height: 0;
-  margin: 5px 0;
+  margin: 6px 0;
   border: 0;
   border-top: 1px solid var(--line);
 }
 
 .rail-btn {
-  width: 46px;
-  padding: 5px 0 3px;
+  width: 48px;
+  padding: 6px 0 4px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  color: var(--fg-faint);
+  gap: 3px;
+  color: var(--faint);
   background: transparent;
   border: 1px solid transparent;
+  border-radius: var(--radius-sm);
   font: inherit;
   text-decoration: none;
   cursor: pointer;
@@ -73,19 +97,17 @@ html, body {
   height: 18px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.2;
+  stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
-.rail-btn span { font-size: 9px; letter-spacing: 0.02em; }
+.rail-btn span { font-size: 10px; line-height: 1.2; }
 .rail-btn:hover { color: var(--fg); }
-.rail-btn.on { color: var(--accent); background: var(--panel); border-color: var(--line-bright); }
+.rail-btn.on { color: var(--accent); background: var(--panel); border-color: var(--line); }
 
 /* ----------------------------------------------------------------- panel */
 
-/* Body scrolls, footer does not: save and reset stay reachable from every
-   section without being repeated in each one. */
 #panel {
   width: var(--panel-w);
   flex: none;
@@ -97,134 +119,180 @@ html, body {
 
 #panel.collapsed { display: none; }
 
-#panelBody { flex: 1; min-height: 0; overflow-y: auto; padding: 8px; }
+#panelBody { flex: 1; min-height: 0; overflow-y: auto; padding: 11px; }
 
 #panelFooter {
   flex: none;
-  padding: 6px 8px 8px;
+  padding: 9px 11px 11px;
   border-top: 1px solid var(--line);
 }
 
-#panel section > h2:first-child { margin-top: 0; }
-
-#panelToggle {
-  width: 13px;
-  flex: none;
-  padding: 0;
-  color: var(--fg-faint);
-  background: var(--rail);
-  border: 0;
-  border-right: 1px solid var(--line);
-  font: inherit;
-  cursor: pointer;
+/* Each h2 opens a group, and each group is a hairline box. */
+.grp {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 9px 10px;
+  margin-bottom: 9px;
 }
 
-#panelToggle:hover { color: var(--fg); background: var(--panel); }
+.grp:last-child { margin-bottom: 0; }
 
 h2 {
-  margin: 10px 0 5px;
-  font-size: 10px;
-  font-weight: normal;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--fg-faint);
+  margin: 0 0 7px;
+  font-size: var(--size);
+  font-weight: 500;
+  color: var(--fg);
 }
 
+.since {
+  margin: -5px 0 8px;
+  font-size: var(--size-small);
+  color: var(--faint);
+}
+
+/* ---------------------------------------------------------------- controls */
+
 label {
-  display: block;
-  padding: 2px 0;
-  color: var(--fg-dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  color: var(--dim);
   cursor: pointer;
 }
 
 label:hover { color: var(--fg); }
-label.sub { padding-left: 15px; }
+label.sub { padding-left: 14px; }
 
+/* A switch, not a tick box: with a single warm accent the knob's position
+   carries the on/off state instead of colour alone having to. */
 input[type="checkbox"] {
   appearance: none;
-  width: 9px;
-  height: 9px;
-  margin: 0 6px 0 0;
-  border: 1px solid var(--line-bright);
-  background: transparent;
-  vertical-align: baseline;
+  order: 2;
+  margin: 0 0 0 auto;
+  width: 26px;
+  height: 15px;
+  flex: none;
+  border: 0;
+  border-radius: 8px;
+  background: var(--ctl);
+  position: relative;
   cursor: pointer;
 }
 
-input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--knob);
+}
 
-label.slider { color: var(--fg-dim); }
-label.slider span { float: right; color: var(--fg); }
+input[type="checkbox"]:checked { background: var(--accent); }
+input[type="checkbox"]:checked::after { left: 13px; background: var(--panel); }
+
+label.slider { flex-wrap: wrap; }
+label.slider span { margin-left: auto; color: var(--fg); font-family: var(--mono); font-size: var(--size-num); }
 
 input[type="range"] {
   appearance: none;
-  display: block;
-  width: 100%;
-  height: 12px;
-  margin: 2px 0 1px;
+  flex-basis: 100%;
+  height: 14px;
+  margin: 3px 0 0;
   background: transparent;
   cursor: pointer;
 }
 
-input[type="range"]::-webkit-slider-runnable-track { height: 1px; background: var(--line-bright); }
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 3px; border-radius: 2px; background: var(--ctl);
+}
 input[type="range"]::-webkit-slider-thumb {
-  appearance: none; width: 3px; height: 11px; margin-top: -5px; background: var(--fg); border: 0;
+  appearance: none; width: 11px; height: 11px; margin-top: -4px;
+  border: 0; border-radius: 50%; background: var(--accent);
 }
-input[type="range"]::-moz-range-track { height: 1px; background: var(--line-bright); }
+input[type="range"]::-moz-range-track { height: 3px; border-radius: 2px; background: var(--ctl); }
 input[type="range"]::-moz-range-thumb {
-  width: 3px; height: 11px; border: 0; border-radius: 0; background: var(--fg);
+  width: 11px; height: 11px; border: 0; border-radius: 50%; background: var(--accent);
 }
-
-label.field { display: flex; justify-content: space-between; align-items: center; }
 
 input[type="number"] {
-  width: 70px;
-  padding: 1px 4px;
+  margin-left: auto;
+  width: 78px;
+  padding: 3px 8px;
   color: var(--fg);
-  background: #0c0c0c;
-  border: 1px solid var(--line-bright);
-  font: inherit;
+  background: var(--sunken);
+  border: 1px solid var(--ctl);
+  border-radius: var(--radius-sm);
+  font: var(--size-num)/1.5 var(--mono);
   text-align: right;
 }
 
-.row { display: flex; gap: 4px; margin-top: 4px; }
+.row { display: flex; gap: 6px; margin-top: 7px; }
 
 button {
   flex: 1;
-  padding: 4px 0;
-  color: var(--fg-dim);
-  background: #0f0f0f;
-  border: 1px solid var(--line-bright);
-  font: inherit;
-  letter-spacing: 0.06em;
+  padding: 6px 0;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--ctl);
+  border-radius: var(--radius-sm);
+  font: var(--size-num)/1.4 var(--sans);
   cursor: pointer;
 }
 
-button:hover { color: var(--fg); border-color: var(--fg-faint); }
+button:hover { border-color: var(--accent); color: var(--accent); }
 
 #settingsNote {
-  margin: 4px 0 0;
-  min-height: 13px;
-  color: var(--fg-faint);
+  margin: 6px 0 0;
+  min-height: 14px;
+  font-size: var(--size-small);
+  color: var(--faint);
 }
+
+/* ---------------------------------------------------------------- readouts */
 
 #altLegend {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 1px 8px;
+  gap: 3px 8px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-#altLegend li { display: flex; align-items: center; color: var(--fg-dim); }
-#altLegend i { width: 9px; height: 9px; margin-right: 5px; flex: none; }
+#altLegend li { display: flex; align-items: center; color: var(--dim); font-size: var(--size-num); }
+#altLegend i { width: 10px; height: 10px; border-radius: 2px; margin-right: 7px; flex: none; }
 
-dl { display: grid; grid-template-columns: auto 1fr; gap: 1px 8px; margin: 0; }
-dt { color: var(--fg-faint); }
-dd { margin: 0; text-align: right; color: var(--fg); overflow-wrap: anywhere; }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }
+dt { color: var(--faint); }
+dd {
+  margin: 0;
+  text-align: right;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--size-num);
+  overflow-wrap: anywhere;
+}
 
 /* ----------------------------------------------------------------- stage */
+
+#panelToggle {
+  width: 14px;
+  flex: none;
+  padding: 0;
+  color: var(--faint);
+  background: var(--rail);
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  font: var(--size)/1 var(--sans);
+  cursor: pointer;
+}
+
+#panelToggle:hover { color: var(--accent); background: var(--panel); }
 
 #stage { position: relative; flex: 1; min-width: 0; }
 
@@ -235,29 +303,33 @@ dd { margin: 0; text-align: right; color: var(--fg); overflow-wrap: anywhere; }
 #hint {
   position: absolute;
   left: 50%;
-  bottom: 8px;
+  bottom: 9px;
   transform: translateX(-50%);
-  color: var(--fg-faint);
+  color: var(--faint);
+  font-size: var(--size-small);
   pointer-events: none;
   white-space: nowrap;
 }
 
 #attribution {
   position: absolute;
-  right: 8px;
-  bottom: 6px;
-  color: #4a4a4a;
+  right: 10px;
+  bottom: 8px;
+  color: #4a4e55;
+  font-size: var(--size-small);
   pointer-events: none;
 }
 
 #status {
   position: absolute;
-  right: 8px;
-  top: 8px;
-  padding: 3px 7px;
-  color: var(--fg-dim);
+  right: 10px;
+  top: 10px;
+  padding: 4px 9px;
+  color: var(--dim);
   background: var(--panel);
   border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: var(--size-num);
 }
 
 #status.error { color: #ff6a5e; border-color: #5a2a26; }
