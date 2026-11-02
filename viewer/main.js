@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  loadEnvelope, buildGrid, summarize, cellRecord, rangeAt,
+  loadEnvelope, buildGrid, summarize, cellRecord, rangeAt, topAltitudeFt,
 } from './envelope.js';
 import {
   buildGround, buildEnvelopeSurface, buildContourRings, buildHorizonSurface,
@@ -32,9 +32,12 @@ const DEFAULT_UI = {
   view: 'orbit',
   layers: {
     envelope: true, contours: true, horizon: true, aircraft: true, ground: true,
-    basemap: true,
+    basemap: true, footprint: false,
   },
   mapOpacity: 0.75,
+  extendHorizon: false,
+  altMinFt: 0,
+  altMaxFt: 50000,
   exag: 8,
   curvature: true,
   colorByAlt: true,
@@ -83,6 +86,7 @@ let groundGroup = null;
 let envelopeGroup = null;
 let contourGroup = null;
 let horizonGroup = null;
+let footprintGroup = null;
 let basemap = null;      // loaded tiles and texture, built once
 let basemapMesh = null;  // rebuilt whenever the projection changes
 
@@ -92,7 +96,21 @@ function viewOpts() {
     exag: ui.exag,
     curvature: ui.curvature,
     colorByAlt: ui.colorByAlt,
+    altMinFt: ui.altMinFt,
+    altMaxFt: ui.altMaxFt,
   };
+}
+
+/** True when the altitude filter is showing everything. */
+function altFilterIsOpen() {
+  return ui.altMinFt <= 0 && ui.altMaxFt >= 50000;
+}
+
+/** Live traffic inside the altitude window. */
+function visibleContacts() {
+  if (altFilterIsOpen()) return contacts;
+  return contacts.filter(
+    (c) => c.altFt >= ui.altMinFt && c.altFt <= ui.altMaxFt);
 }
 
 function renderAltitudeLegend() {
@@ -128,6 +146,7 @@ function rebuildScene() {
   disposeGroup(groundGroup);
   disposeGroup(envelopeGroup);
   disposeGroup(contourGroup);
+  disposeGroup(footprintGroup);
   disposeGroup(horizonGroup);
   disposeGroup(basemapMesh);
   basemapMesh = null;
@@ -135,8 +154,11 @@ function rebuildScene() {
   groundGroup = buildGround(maxRangeNm, opts);
   envelopeGroup = buildEnvelopeSurface(model, opts);
   contourGroup = buildContourRings(model, CONTOUR_ALTITUDES, opts);
-  horizonGroup = buildHorizonSurface(maxRangeNm, opts);
-  scene.add(groundGroup, envelopeGroup, contourGroup, horizonGroup);
+  footprintGroup = buildContourRings(model, CONTOUR_ALTITUDES, opts, true);
+  horizonGroup = buildHorizonSurface(
+    maxRangeNm, opts, ui.extendHorizon ? topAltitudeFt(model) : 0);
+  scene.add(groundGroup, envelopeGroup, contourGroup, footprintGroup,
+    horizonGroup);
 
   if (basemap && doc?.rx?.lat != null) {
     const radius = Math.min(maxRangeNm, basemap.meta.radiusNm);
@@ -144,6 +166,9 @@ function rebuildScene() {
     scene.add(basemapMesh);
   }
   applyLayerVisibility();
+  // Re-filtered here as well as on each poll, because changing the altitude
+  // window has to take effect without waiting for the next second of data.
+  aircraftLayer.setContacts(visibleContacts());
   aircraftLayer.update(opts);
 }
 
@@ -152,6 +177,7 @@ function applyLayerVisibility() {
   if (envelopeGroup) envelopeGroup.visible = ui.layers.envelope;
   if (contourGroup) contourGroup.visible = ui.layers.contours;
   if (horizonGroup) horizonGroup.visible = ui.layers.horizon;
+  if (footprintGroup) footprintGroup.visible = ui.layers.footprint;
   if (basemapMesh) basemapMesh.visible = ui.layers.basemap;
   aircraftLayer.group.visible = ui.layers.aircraft;
 }
@@ -227,7 +253,7 @@ async function refreshAircraft() {
       });
     }
     contacts = out;
-    aircraftLayer.setContacts(contacts);
+    aircraftLayer.setContacts(visibleContacts());
     aircraftLayer.update(viewOpts());
   } catch (err) {
     setStatus(`traffic: ${err.message}`, true);
@@ -271,7 +297,10 @@ function renderStats() {
 function setStatus(text, isError) {
   const node = el('status');
   if (!text) {
-    node.textContent = `${contacts.length} contacts`;
+    const shown = visibleContacts().length;
+    node.textContent = altFilterIsOpen()
+      ? `${contacts.length} contacts`
+      : `${shown} of ${contacts.length} contacts`;
     node.classList.remove('error');
     return;
   }
@@ -415,6 +444,8 @@ function applyUiToControls() {
     layerAircraft: ui.layers.aircraft,
     layerGround: ui.layers.ground,
     layerBasemap: ui.layers.basemap,
+    layerFootprint: ui.layers.footprint,
+    extendHorizon: ui.extendHorizon,
     curvature: ui.curvature,
     closure: ui.closure,
     colorByAlt: ui.colorByAlt,
@@ -442,6 +473,8 @@ function applyUiToControls() {
   }
 
   el('rxAlt').value = String(ui.rxAltFt);
+  el('altMin').value = String(ui.altMinFt);
+  el('altMax').value = String(ui.altMaxFt);
   el('altLegendGroup').hidden = !ui.colorByAlt;
 }
 
@@ -465,6 +498,32 @@ function wireUi() {
   bindCheckbox('layerAircraft', (v) => { ui.layers.aircraft = v; applyLayerVisibility(); });
   bindCheckbox('layerGround', (v) => { ui.layers.ground = v; applyLayerVisibility(); });
   bindCheckbox('layerBasemap', (v) => { ui.layers.basemap = v; applyLayerVisibility(); });
+  bindCheckbox('layerFootprint', (v) => {
+    ui.layers.footprint = v; applyLayerVisibility();
+  });
+  bindCheckbox('extendHorizon', (v) => { ui.extendHorizon = v; onViewOptionChange(); });
+
+  const applyAltFilter = () => {
+    let lo = Number(el('altMin').value);
+    let hi = Number(el('altMax').value);
+    if (!Number.isFinite(lo)) lo = 0;
+    if (!Number.isFinite(hi)) hi = 50000;
+    // Crossed values would otherwise filter everything away and look like a bug.
+    if (lo > hi) [lo, hi] = [hi, lo];
+    ui.altMinFt = Math.max(0, Math.min(50000, lo));
+    ui.altMaxFt = Math.max(0, Math.min(50000, hi));
+    el('altMin').value = String(ui.altMinFt);
+    el('altMax').value = String(ui.altMaxFt);
+    onViewOptionChange();
+    setStatus(null);
+  };
+  el('altMin').addEventListener('change', applyAltFilter);
+  el('altMax').addEventListener('change', applyAltFilter);
+  el('altReset').addEventListener('click', () => {
+    el('altMin').value = '0';
+    el('altMax').value = '50000';
+    applyAltFilter();
+  });
 
   bindRange('mapOpacity', 'mapOpacityOut', (v) => `${v}%`, (v) => {
     ui.mapOpacity = v / 100;

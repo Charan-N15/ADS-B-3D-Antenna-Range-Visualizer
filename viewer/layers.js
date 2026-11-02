@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import {
   project, curvatureDropFt, horizonFloorFt, horizonRangeNm, FT_PER_NM,
 } from './geo.js';
-import { rangeAt } from './envelope.js';
+import { rangeAt, bandRange } from './envelope.js';
 import { altitudeCss } from './altitude.js';
 
 /** tar1090's ramp as a three colour. Cached: the ramp is a pure lookup. */
@@ -104,11 +104,17 @@ export function buildEnvelopeSurface(model, opts) {
     }
   }
 
+  // Vertices are always built for every level, even filtered-out ones: the index
+  // arithmetic below depends on a dense grid, and 18,000 positions cost nothing.
+  // The filter decides which quads get drawn, not which vertices exist.
+  const [loBand, hiBand] = bandRange(model, opts.altMinFt ?? 0,
+    opts.altMaxFt ?? model.edges[nb]);
+
   // A bearing with no coverage in a band has no surface there — not a surface at
   // zero range. Collapsing those vertices to the origin would fan enormous
   // triangles across the scene and read as coverage that was never measured.
   const indices = [];
-  for (let level = 0; level < levels - 1; level++) {
+  for (let level = loBand; level <= hiBand && level < levels - 1; level++) {
     for (let az = 0; az < 360; az++) {
       const next = (az + 1) % 360;
       const a = level * 360 + az;
@@ -152,13 +158,13 @@ export function buildEnvelopeSurface(model, opts) {
     wireColors.push(colors[i * 3], colors[i * 3 + 1], colors[i * 3 + 2]);
     wireColors.push(colors[j * 3], colors[j * 3 + 1], colors[j * 3 + 2]);
   };
-  for (let level = 0; level < levels; level += 2) {
+  for (let level = loBand; level <= hiBand + 1 && level < levels; level += 2) {
     for (let az = 0; az < 360; az++) {
       pushSegment(level * 360 + az, level * 360 + (az + 1) % 360);
     }
   }
   for (let az = 0; az < 360; az += 15) {
-    for (let level = 0; level < levels - 1; level++) {
+    for (let level = loBand; level <= hiBand && level < levels - 1; level++) {
       pushSegment(level * 360 + az, (level + 1) * 360 + az);
     }
   }
@@ -186,12 +192,15 @@ export function buildEnvelopeSurface(model, opts) {
  * The familiar outline, repeated at height. One closed ring per altitude, each
  * drawn at its true height, which is the whole point of the exercise.
  */
-export function buildContourRings(model, altitudes, opts) {
+export function buildContourRings(model, altitudes, opts, onGround = false) {
   const group = new THREE.Group();
-  group.name = 'contours';
+  group.name = onGround ? 'footprint' : 'contours';
   const byAlt = Boolean(opts.colorByAlt);
+  const altMin = opts.altMinFt ?? 0;
+  const altMax = opts.altMaxFt ?? model.edges[model.nBands];
 
   for (const altFt of altitudes) {
+    if (altFt < altMin || altFt > altMax) continue;
     // The rings are where the altitude-to-colour mapping is easiest to read, so
     // each one gets its own material at its own altitude's colour.
     const mat = new THREE.LineBasicMaterial({
@@ -219,7 +228,9 @@ export function buildContourRings(model, altitudes, opts) {
       const a = az % 360;
       const r = rangeAt(model, a, band);
       if (r < MIN_RADIUS_NM) { flush(); continue; }
-      const [x, y, z] = project(a, r, altFt, opts);
+      // Dropped to the ground the ring becomes a footprint: the same reach, laid
+      // over the map so you can read it against towns rather than against air.
+      const [x, y, z] = project(a, r, onGround ? 0 : altFt, opts);
       run.push(new THREE.Vector3(x, y, z));
     }
     flush();
@@ -232,7 +243,7 @@ export function buildContourRings(model, altitudes, opts) {
  * by definition, so any departure from it in the measured surface is antenna
  * pattern, sensitivity or terrain rather than geometry.
  */
-export function buildHorizonSurface(maxRangeNm, opts) {
+export function buildHorizonSurface(maxRangeNm, opts, extendToAltFt) {
   const group = new THREE.Group();
   group.name = 'horizon';
   const mat = new THREE.LineBasicMaterial({
@@ -240,8 +251,18 @@ export function buildHorizonSurface(maxRangeNm, opts) {
   });
   const rxAltFt = opts.rxAltFt || 0;
 
+  // Stopping at the measured range truncates this surface low down — at 142 nm
+  // the horizon limit is only about 11,000 ft, so it reads as a saucer under the
+  // envelope rather than something to compare against. Running it out to where
+  // it reaches the top of the measured data makes the two directly comparable,
+  // at the cost of a surface roughly twice as wide.
+  let limit = maxRangeNm;
+  if (extendToAltFt) {
+    limit = Math.max(limit, horizonRangeNm(extendToAltFt, rxAltFt));
+  }
+
   const ranges = [];
-  for (let r = 10; r <= maxRangeNm; r += 10) ranges.push(r);
+  for (let r = 10; r <= limit; r += 10) ranges.push(r);
 
   for (const r of ranges) {
     const altFt = horizonFloorFt(r, rxAltFt);
@@ -255,7 +276,7 @@ export function buildHorizonSurface(maxRangeNm, opts) {
 
   for (let az = 0; az < 360; az += 30) {
     const pts = [];
-    for (let r = 0; r <= maxRangeNm; r += 5) {
+    for (let r = 0; r <= limit; r += 5) {
       const [x, y, z] = project(az, r, horizonFloorFt(r, rxAltFt), opts);
       pts.push(new THREE.Vector3(x, y, z));
     }

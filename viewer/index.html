@@ -41,6 +41,8 @@
     <label><input type="checkbox" id="layerEnvelope" checked> envelope surface</label>
     <label><input type="checkbox" id="layerContours" checked> altitude rings</label>
     <label><input type="checkbox" id="layerHorizon" checked> theoretical horizon</label>
+    <label><input type="checkbox" id="extendHorizon"> &nbsp;&nbsp;extend to top</label>
+    <label><input type="checkbox" id="layerFootprint"> ground footprint</label>
     <label><input type="checkbox" id="layerAircraft" checked> live traffic</label>
     <label><input type="checkbox" id="layerGround" checked> range rings</label>
     <label><input type="checkbox" id="layerBasemap" checked> map</label>
@@ -70,6 +72,15 @@
     <label><input type="checkbox" id="closure" checked> altitude closure</label>
     <label class="field">antenna ft
       <input type="number" id="rxAlt" min="0" max="10000" step="10" value="100"></label>
+  </div>
+
+  <div class="group">
+    <h2>altitude filter</h2>
+    <label class="field">from ft
+      <input type="number" id="altMin" min="0" max="50000" step="500" value="0"></label>
+    <label class="field">to ft
+      <input type="number" id="altMax" min="0" max="50000" step="500" value="50000"></label>
+    <div class="row"><button id="altReset">SHOW ALL</button></div>
   </div>
 
   <div class="group" id="sliceControls" hidden>
