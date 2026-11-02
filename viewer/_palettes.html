@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>range3d palettes</title>
+<style>
+body{margin:0;background:#070707;color:#d8d8d8;font:11px/1.45 ui-monospace,"DejaVu Sans Mono",Consolas,monospace}
+#cols{display:flex;gap:10px;padding:10px}
+.col{flex:1}
+.hd{padding:6px 2px;color:#cfcfcf;letter-spacing:.08em}
+.hd em{display:block;font-style:normal;color:#6f6f6f;letter-spacing:0;margin-top:2px}
+.frame{display:flex;height:560px;border:1px solid #2a2a2a}
+
+/* ---- per-scheme tokens ---- */
+.s0{--panel:#161616;--rail:#101010;--fg:#d8d8d8;--dim:#8a8a8a;--faint:#5f5f5f;
+    --line:#2c2c2c;--ctl:#3d3d3d;--accent:#6ba8df;--sw:1.2;--lbl:9px}
+.s1{--panel:#161616;--rail:#121212;--fg:#e8e8e8;--dim:#a8a8a8;--faint:#858585;
+    --line:#333;--ctl:#636363;--accent:#7fb8ea;--sw:1.6;--lbl:10px}
+.s2{--panel:#1e1e1e;--rail:#151515;--fg:#ececec;--dim:#b0b0b0;--faint:#8d8d8d;
+    --line:#363636;--ctl:#696969;--accent:#7fb8ea;--sw:1.6;--lbl:10px}
+.s3{--panel:#1e1e1e;--rail:#151515;--fg:#f0f0f0;--dim:#bcbcbc;--faint:#9a9a9a;
+    --line:#3a3a3a;--ctl:#696969;--accent:#8cc4f0;--sw:1.7;--lbl:10px}
+
+.rail{width:54px;flex:none;display:flex;flex-direction:column;align-items:center;gap:2px;
+  padding:6px 0;background:var(--rail);border-right:1px solid var(--line)}
+.rail hr{width:60%;height:0;margin:5px 0;border:0;border-top:1px solid var(--line)}
+.rb{width:46px;padding:5px 0 3px;display:flex;flex-direction:column;align-items:center;gap:2px;
+  color:var(--faint);border:1px solid transparent}
+.rb svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:var(--sw);
+  stroke-linecap:round;stroke-linejoin:round}
+.rb span{font-size:var(--lbl)}
+.rb.on{color:var(--accent);background:var(--panel);border-color:var(--ctl)}
+
+.panel{width:198px;flex:none;display:flex;flex-direction:column;background:var(--panel);
+  border-right:1px solid var(--line)}
+.body{flex:1;padding:8px;overflow:hidden}
+.foot{flex:none;padding:6px 8px 8px;border-top:1px solid var(--line)}
+h2{margin:10px 0 5px;font-size:10px;font-weight:400;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+h2:first-child{margin-top:0}
+label{display:block;padding:2px 0;color:var(--dim)}
+.ck{display:inline-block;width:9px;height:9px;margin-right:6px;border:1px solid var(--ctl);vertical-align:baseline}
+.ck.on{background:var(--accent);border-color:var(--accent)}
+.val{float:right;color:var(--fg)}
+.sld{display:block;height:1px;background:var(--ctl);margin:6px 0 2px;position:relative}
+.sld::after{content:"";position:absolute;left:38%;top:-5px;width:3px;height:11px;background:var(--fg)}
+.fld{display:flex;justify-content:space-between;align-items:center;padding:2px 0;color:var(--dim)}
+.fld b{font-weight:400;color:var(--fg);background:#0c0c0c;border:1px solid var(--ctl);padding:1px 6px;min-width:62px;text-align:right}
+.row{display:flex;gap:4px;margin-top:4px}
+.btn{flex:1;padding:4px 0;text-align:center;color:var(--dim);background:rgba(0,0,0,.25);
+  border:1px solid var(--ctl);letter-spacing:.06em}
+.chips{display:grid;grid-template-columns:1fr 1fr;gap:1px 8px}
+.chips span{display:flex;align-items:center;color:var(--dim)}
+.chips i{width:9px;height:9px;margin-right:5px;flex:none}
+.stage{flex:1;background:#0b0b0b;position:relative}
+.stage svg{position:absolute;inset:0;width:100%;height:100%}
+</style>
+</head>
+<body>
+<div id="cols">
+
+  <div class="col">
+    <div class="hd">CURRENT<em>faint 2.83:1 &mdash; fails. borders 1.67:1</em></div>
+    <div class="frame s0">
+      <div class="rail">
+        <div class="rb on"><svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="4.5"/><ellipse cx="9" cy="9" rx="8" ry="3.2"/></svg><span>orbit</span></div>
+        <div class="rb"><svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="9" r="5"/><circle cx="9" cy="9" r="8"/></svg><span>top</span></div>
+        <div class="rb"><svg viewBox="0 0 18 18"><rect x="1.5" y="4" width="15" height="10"/><path d="M1.5 12.5 L16.5 6"/></svg><span>slice</span></div>
+        <hr>
+        <div class="rb on"><svg viewBox="0 0 18 18"><path d="M9 2 L16 6 L9 10 L2 6 Z"/><path d="M2 10 L9 14 L16 10"/></svg><span>layers</span></div>
+        <div class="rb"><svg viewBox="0 0 18 18"><path d="M2.5 5h13M2.5 9h13M2.5 13h13"/><circle cx="6" cy="5" r="1.8"/><circle cx="12" cy="9" r="1.8"/><circle cx="7.5" cy="13" r="1.8"/></svg><span>view</span></div>
+        <div class="rb"><svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><path d="M9 8.2v4.6M9 5.4v.6"/></svg><span>info</span></div>
+      </div>
+      <div class="panel">
+        <div class="body">
+          <h2>layers</h2>
+          <label><i class="ck on"></i>envelope surface</label>
+          <label><i class="ck on"></i>altitude rings</label>
+          <label><i class="ck on"></i>theoretical horizon</label>
+          <label><i class="ck"></i>ground footprint</label>
+          <label><i class="ck on"></i>live traffic</label>
+          <label><i class="ck on"></i>map</label>
+          <label>map level <span class="val">75%</span><i class="sld"></i></label>
+          <h2>altitude</h2>
+          <div class="chips">
+            <span><i style="background:#f0601a"></i>sfc</span><span><i style="background:#f19222"></i>2k</span>
+            <span><i style="background:#e6bc0f"></i>5k</span><span><i style="background:#24c50d"></i>10k</span>
+            <span><i style="background:#2f8fd0"></i>20k</span><span><i style="background:#5b4fe0"></i>30k</span>
+          </div>
+          <h2>envelope</h2>
+          <div class="fld">cells <span class="val">16,423</span></div>
+          <div class="fld">max range <span class="val">142.1 nm</span></div>
+        </div>
+        <div class="foot"><div class="row"><span class="btn">SAVE VIEW</span><span class="btn">RESET</span></div></div>
+      </div>
+      <div class="stage"><svg viewBox="0 0 200 560" preserveAspectRatio="xMidYMid slice">
+        <ellipse cx="40" cy="300" rx="150" ry="46" fill="none" stroke="#242424"/>
+        <ellipse cx="40" cy="250" rx="130" ry="38" fill="none" stroke="#d94fd9" opacity=".8"/>
+        <ellipse cx="40" cy="272" rx="95" ry="28" fill="none" stroke="#3fc9c0" opacity=".8"/>
+      </svg></div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="hd">A &mdash; LIFTED<em>same hues, brighter. faint 4.90:1, borders 3.01:1</em></div>
+    <div class="frame s1">
+      <div class="rail">
+        <div class="rb on"><svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="4.5"/><ellipse cx="9" cy="9" rx="8" ry="3.2"/></svg><span>orbit</span></div>
+        <div class="rb"><svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="9" r="5"/><circle cx="9" cy="9" r="8"/></svg><span>top</span></div>
+        <div class="rb"><svg viewBox="0 0 18 18"><rect x="1.5" y="4" width="15" height="10"/><path d="M1.5 12.5 L16.5 6"/></svg><span>slice</span></div>
+        <hr>
+        <div class="rb on"><svg viewBox="0 0 18 18"><path d="M9 2 L16 6 L9 10 L2 6 Z"/><path d="M2 10 L9 14 L16 10"/></svg><span>layers</span></div>
+        <div class="rb"><svg viewBox="0 0 18 18"><path d="M2.5 5h13M2.5 9h13M2.5 13h13"/><circle cx="6" cy="5" r="1.8"/><circle cx="12" cy="9" r="1.8"/><circle cx="7.5" cy="13" r="1.8"/></svg><span>view</span></div>
+        <div class="rb"><svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><path d="M9 8.2v4.6M9 5.4v.6"/></svg><span>info</span></div>
+      </div>
+      <div class="panel">
+        <div class="body">
+          <h2>layers</h2>
+          <label><i class="ck on"></i>envelope surface</label>
+          <label><i class="ck on"></i>altitude rings</label>
+          <label><i class="ck on"></i>theoretical horizon</label>
+          <label><i class="ck"></i>ground footprint</label>
+          <label><i class="ck on"></i>live traffic</label>
+          <label><i class="ck on"></i>map</label>
+          <label>map level <span class="val">75%</span><i class="sld"></i></label>
+          <h2>altitude</h2>
+          <div class="chips">
+            <span><i style="background:#f0601a"></i>sfc</span><span><i style="background:#f19222"></i>2k</span>
+            <span><i style="background:#e6bc0f"></i>5k</span><span><i style="background:#24c50d"></i>10k</span>
+            <span><i style="background:#2f8fd0"></i>20k</span><span><i style="background:#5b4fe0"></i>30k</span>
+          </div>
+          <h2>envelope</h2>
+          <div class="fld">cells <span class="val">16,423</span></div>
+          <div class="fld">max range <span class="val">142.1 nm</span></div>
+        </div>
+        <div class="foot"><div class="row"><span class="btn">SAVE VIEW</span><span class="btn">RESET</span></div></div>
+      </div>
+      <div class="stage"><svg viewBox="0 0 200 560" preserveAspectRatio="xMidYMid slice">
+        <ellipse cx="40" cy="300" rx="150" ry="46" fill="none" stroke="#2a2a2a"/>
+        <ellipse cx="40" cy="250" rx="130" ry="38" fill="none" stroke="#d94fd9" opacity=".85"/>
+        <ellipse cx="40" cy="272" rx="95" ry="28" fill="none" stroke="#3fc9c0" opacity=".85"/>
+      </svg></div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="hd">B &mdash; LAYERED<em>panel lifted off the stage. faint 5.02:1</em></div>
+    <div class="frame s2">
+      <div class="rail">
+        <div class="rb on"><svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="4.5"/><ellipse cx="9" cy="9" rx="8" ry="3.2"/></svg><span>orbit</span></div>
+        <div class="rb"><svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="9" r="5"/><circle cx="9" cy="9" r="8"/></svg><span>top</span></div>
+        <div class="rb"><svg viewBox="0 0 18 18"><rect x="1.5" y="4" width="15" height="10"/><path d="M1.5 12.5 L16.5 6"/></svg><span>slice</span></div>
+        <hr>
+        <div class="rb on"><svg viewBox="0 0 18 18"><path d="M9 2 L16 6 L9 10 L2 6 Z"/><path d="M2 10 L9 14 L16 10"/></svg><span>layers</span></div>
+        <div class="rb"><svg viewBox="0 0 18 18"><path d="M2.5 5h13M2.5 9h13M2.5 13h13"/><circle cx="6" cy="5" r="1.8"/><circle cx="12" cy="9" r="1.8"/><circle cx="7.5" cy="13" r="1.8"/></svg><span>view</span></div>
+        <div class="rb"><svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><path d="M9 8.2v4.6M9 5.4v.6"/></svg><span>info</span></div>
+      </div>
+      <div class="panel">
+        <div class="body">
+          <h2>layers</h2>
+          <label><i class="ck on"></i>envelope surface</label>
+          <label><i class="ck on"></i>altitude rings</label>
+          <label><i class="ck on"></i>theoretical horizon</label>
+          <label><i class="ck"></i>ground footprint</label>
+          <label><i class="ck on"></i>live traffic</label>
+          <label><i class="ck on"></i>map</label>
+          <label>map level <span class="val">75%</span><i class="sld"></i></label>
+          <h2>altitude</h2>
+          <div class="chips">
+            <span><i style="background:#f0601a"></i>sfc</span><span><i style="background:#f19222"></i>2k</span>
+            <span><i style="background:#e6bc0f"></i>5k</span><span><i style="background:#24c50d"></i>10k</span>
+            <span><i style="background:#2f8fd0"></i>20k</span><span><i style="background:#5b4fe0"></i>30k</span>
+          </div>
+          <h2>envelope</h2>
+          <div class="fld">cells <span class="val">16,423</span></div>
+          <div class="fld">max range <span class="val">142.1 nm</span></div>
+        </div>
+        <div class="foot"><div class="row"><span class="btn">SAVE VIEW</span><span class="btn">RESET</span></div></div>
+      </div>
+      <div class="stage"><svg viewBox="0 0 200 560" preserveAspectRatio="xMidYMid slice">
+        <ellipse cx="40" cy="300" rx="150" ry="46" fill="none" stroke="#2a2a2a"/>
+        <ellipse cx="40" cy="250" rx="130" ry="38" fill="none" stroke="#d94fd9" opacity=".85"/>
+        <ellipse cx="40" cy="272" rx="95" ry="28" fill="none" stroke="#3fc9c0" opacity=".85"/>
+      </svg></div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="hd">C &mdash; ACCENT<em>brightest. faint 5.92:1, accent 8.95:1</em></div>
+    <div class="frame s3">
+      <div class="rail">
+        <div class="rb on"><svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="4.5"/><ellipse cx="9" cy="9" rx="8" ry="3.2"/></svg><span>orbit</span></div>
+        <div class="rb"><svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="9" r="5"/><circle cx="9" cy="9" r="8"/></svg><span>top</span></div>
+        <div class="rb"><svg viewBox="0 0 18 18"><rect x="1.5" y="4" width="15" height="10"/><path d="M1.5 12.5 L16.5 6"/></svg><span>slice</span></div>
+        <hr>
+        <div class="rb on"><svg viewBox="0 0 18 18"><path d="M9 2 L16 6 L9 10 L2 6 Z"/><path d="M2 10 L9 14 L16 10"/></svg><span>layers</span></div>
+        <div class="rb"><svg viewBox="0 0 18 18"><path d="M2.5 5h13M2.5 9h13M2.5 13h13"/><circle cx="6" cy="5" r="1.8"/><circle cx="12" cy="9" r="1.8"/><circle cx="7.5" cy="13" r="1.8"/></svg><span>view</span></div>
+        <div class="rb"><svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><path d="M9 8.2v4.6M9 5.4v.6"/></svg><span>info</span></div>
+      </div>
+      <div class="panel">
+        <div class="body">
+          <h2 style="color:var(--accent)">layers</h2>
+          <label><i class="ck on"></i>envelope surface</label>
+          <label><i class="ck on"></i>altitude rings</label>
+          <label><i class="ck on"></i>theoretical horizon</label>
+          <label><i class="ck"></i>ground footprint</label>
+          <label><i class="ck on"></i>live traffic</label>
+          <label><i class="ck on"></i>map</label>
+          <label>map level <span class="val">75%</span><i class="sld"></i></label>
+          <h2 style="color:var(--accent)">altitude</h2>
+          <div class="chips">
+            <span><i style="background:#f0601a"></i>sfc</span><span><i style="background:#f19222"></i>2k</span>
+            <span><i style="background:#e6bc0f"></i>5k</span><span><i style="background:#24c50d"></i>10k</span>
+            <span><i style="background:#2f8fd0"></i>20k</span><span><i style="background:#5b4fe0"></i>30k</span>
+          </div>
+          <h2 style="color:var(--accent)">envelope</h2>
+          <div class="fld">cells <span class="val">16,423</span></div>
+          <div class="fld">max range <span class="val">142.1 nm</span></div>
+        </div>
+        <div class="foot"><div class="row"><span class="btn">SAVE VIEW</span><span class="btn">RESET</span></div></div>
+      </div>
+      <div class="stage"><svg viewBox="0 0 200 560" preserveAspectRatio="xMidYMid slice">
+        <ellipse cx="40" cy="300" rx="150" ry="46" fill="none" stroke="#2e2e2e"/>
+        <ellipse cx="40" cy="250" rx="130" ry="38" fill="none" stroke="#d94fd9" opacity=".9"/>
+        <ellipse cx="40" cy="272" rx="95" ry="28" fill="none" stroke="#3fc9c0" opacity=".9"/>
+      </svg></div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
