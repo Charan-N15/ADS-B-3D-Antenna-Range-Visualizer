@@ -445,8 +445,10 @@ function applyUiToControls() {
     layerGround: ui.layers.ground,
     layerBasemap: ui.layers.basemap,
     layerFootprint: ui.layers.footprint,
-    extendHorizon: ui.extendHorizon,
+    // Before extendHorizon, which switches it off: restoring them the other way
+    // round would let curvature undo the extension it was meant to accompany.
     curvature: ui.curvature,
+    extendHorizon: ui.extendHorizon,
     closure: ui.closure,
     colorByAlt: ui.colorByAlt,
   };
@@ -485,6 +487,10 @@ function note(text) {
   note.timer = window.setTimeout(() => { node.textContent = ''; }, 4000);
 }
 
+// Curvature setting from before the extended horizon switched it off, so that
+// turning the extension back off returns the view to where it was.
+let curvatureBeforeExtend = null;
+
 function wireUi() {
   el('backTo2d').href = TAR1090_URL;
 
@@ -501,7 +507,26 @@ function wireUi() {
   bindCheckbox('layerFootprint', (v) => {
     ui.layers.footprint = v; applyLayerVisibility();
   });
-  bindCheckbox('extendHorizon', (v) => { ui.extendHorizon = v; onViewOptionChange(); });
+  // Curvature and the extended horizon cannot both be meaningful. With curvature
+  // on, on-screen height is altitude minus the earth's drop at that range, so two
+  // points at the same altitude but different ranges draw at different heights —
+  // and the extended horizon exists precisely to be compared by altitude. Worse,
+  // the ground falls away faster than the line-of-sight floor climbs, so the
+  // surface sinks instead of rising. They are therefore mutually exclusive, and
+  // turning the extension off restores whatever curvature was set before.
+  bindCheckbox('extendHorizon', (v) => {
+    ui.extendHorizon = v;
+    if (v && ui.curvature) {
+      curvatureBeforeExtend = ui.curvature;
+      ui.curvature = false;
+      el('curvature').checked = false;
+    } else if (!v && curvatureBeforeExtend !== null) {
+      ui.curvature = curvatureBeforeExtend;
+      el('curvature').checked = ui.curvature;
+      curvatureBeforeExtend = null;
+    }
+    onViewOptionChange();
+  });
 
   const applyAltFilter = () => {
     let lo = Number(el('altMin').value);
@@ -530,7 +555,17 @@ function wireUi() {
     if (basemapMesh) basemapMesh.material.opacity = ui.mapOpacity;
   });
 
-  bindCheckbox('curvature', (v) => { ui.curvature = v; onViewOptionChange(); });
+  bindCheckbox('curvature', (v) => {
+    ui.curvature = v;
+    // Asking for curvature back is a deliberate choice, so it wins and the
+    // extension stands down rather than silently fighting it.
+    if (v && ui.extendHorizon) {
+      ui.extendHorizon = false;
+      el('extendHorizon').checked = false;
+      curvatureBeforeExtend = null;
+    }
+    onViewOptionChange();
+  });
   bindCheckbox('colorByAlt', (v) => {
     ui.colorByAlt = v;
     el('altLegendGroup').hidden = !v;
