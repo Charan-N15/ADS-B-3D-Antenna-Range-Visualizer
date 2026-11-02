@@ -47,6 +47,8 @@ const DEFAULT_UI = {
   rxAltFt: 100,
   sliceAz: 0,
   sliceSpread: 5,
+  section: 'layers',
+  panelCollapsed: false,
 };
 
 // Saved settings are a convenience, never a requirement: if storage is unreadable
@@ -344,6 +346,27 @@ function frameCamera() {
   controls.update();
 }
 
+/** Shows one rail section in the panel and lights its rail button. */
+function showSection(name) {
+  ui.section = name;
+  for (const node of document.querySelectorAll('#panel section')) {
+    node.hidden = node.dataset.sect !== name;
+  }
+  for (const button of document.querySelectorAll('.rail-btn.sect')) {
+    button.classList.toggle('on', button.dataset.sect === name);
+  }
+}
+
+function setPanelCollapsed(collapsed) {
+  ui.panelCollapsed = collapsed;
+  el('panel').classList.toggle('collapsed', collapsed);
+  const toggle = el('panelToggle');
+  toggle.innerHTML = collapsed ? '&#8250;' : '&#8249;';
+  toggle.title = collapsed ? 'Show the panel' : 'Collapse the panel';
+  // The stage is a flex sibling, so it has just changed width.
+  resize();
+}
+
 function setView(name) {
   ui.view = name;
   for (const button of document.querySelectorAll('button.view')) {
@@ -354,6 +377,13 @@ function setView(name) {
   sceneCanvas.hidden = isSlice;
   el('sliceControls').hidden = !isSlice;
   el('hint').hidden = isSlice;
+
+  // The bearing and spread controls live in the view section, so switching to
+  // slice without opening it would hide the only controls that view has.
+  if (isSlice) {
+    if (ui.panelCollapsed) setPanelCollapsed(false);
+    showSection('view');
+  }
 
   if (name === 'top') {
     camera.up.set(0, 1, 0);
@@ -478,6 +508,8 @@ function applyUiToControls() {
   el('altMin').value = String(ui.altMinFt);
   el('altMax').value = String(ui.altMaxFt);
   el('altLegendGroup').hidden = !ui.colorByAlt;
+  showSection(ui.section);
+  setPanelCollapsed(ui.panelCollapsed);
 }
 
 function note(text) {
@@ -497,6 +529,19 @@ function wireUi() {
   for (const button of document.querySelectorAll('button.view')) {
     button.addEventListener('click', () => setView(button.dataset.view));
   }
+
+  for (const button of document.querySelectorAll('.rail-btn.sect')) {
+    button.addEventListener('click', () => {
+      // Picking a section while the panel is hidden should bring it back,
+      // rather than silently switching something nobody can see.
+      if (ui.panelCollapsed) setPanelCollapsed(false);
+      showSection(button.dataset.sect);
+    });
+  }
+
+  el('panelToggle').addEventListener('click', () => {
+    setPanelCollapsed(!ui.panelCollapsed);
+  });
 
   bindCheckbox('layerEnvelope', (v) => { ui.layers.envelope = v; applyLayerVisibility(); });
   bindCheckbox('layerContours', (v) => { ui.layers.contours = v; applyLayerVisibility(); });

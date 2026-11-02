@@ -3,6 +3,7 @@
 :root {
   --bg: #0c0c0c;
   --panel: #161616;
+  --rail: #101010;
   --line: #2c2c2c;
   --line-bright: #3d3d3d;
   --fg: #d8d8d8;
@@ -10,6 +11,8 @@
   --fg-faint: #5f5f5f;
   --accent: #6ba8df;
   --mono: ui-monospace, "DejaVu Sans Mono", "Consolas", monospace;
+  --rail-w: 54px;
+  --panel-w: 198px;
 }
 
 * { box-sizing: border-box; }
@@ -23,42 +26,93 @@ html, body {
   overflow: hidden;
 }
 
-/* The panel sits beside the view, not over it: a chart with axis labels hidden
-   under an overlay is worse than a slightly smaller chart. */
-#stage { position: absolute; inset: 0 0 0 206px; }
+/* Rail, panel, toggle and stage in one row. The stage takes what is left, so
+   collapsing the panel widens the view with no positioning maths. */
+#shell { display: flex; height: 100%; }
 
-#scene, #slice { display: block; width: 100%; height: 100%; }
-#scene[hidden], #slice[hidden] { display: none; }
-#slice { background: var(--bg); }
+/* ------------------------------------------------------------------ rail */
 
-#hint {
-  position: absolute;
-  left: 50%;
-  bottom: 8px;
-  transform: translateX(-50%);
-  color: var(--fg-faint);
-  pointer-events: none;
-  white-space: nowrap;
+#rail {
+  width: var(--rail-w);
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 0;
+  background: var(--rail);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
 }
 
+#rail hr {
+  width: 60%;
+  height: 0;
+  margin: 5px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.rail-btn {
+  width: 46px;
+  padding: 5px 0 3px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: var(--fg-faint);
+  background: transparent;
+  border: 1px solid transparent;
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.rail-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.rail-btn span { font-size: 9px; letter-spacing: 0.02em; }
+.rail-btn:hover { color: var(--fg); }
+.rail-btn.on { color: var(--accent); background: var(--panel); border-color: var(--line-bright); }
+
+/* ----------------------------------------------------------------- panel */
+
 #panel {
-  position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 206px;
-  overflow-y: auto;
+  width: var(--panel-w);
+  flex: none;
   padding: 8px;
   background: var(--panel);
   border-right: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
+  overflow-y: auto;
 }
 
-.group { padding: 6px 0; border-bottom: 1px solid var(--line); }
-.group:last-child { border-bottom: 0; }
+#panel.collapsed { display: none; }
+
+#panel section > h2:first-child { margin-top: 0; }
+
+#panelToggle {
+  width: 13px;
+  flex: none;
+  padding: 0;
+  color: var(--fg-faint);
+  background: var(--rail);
+  border: 0;
+  border-right: 1px solid var(--line);
+  font: inherit;
+  cursor: pointer;
+}
+
+#panelToggle:hover { color: var(--fg); background: var(--panel); }
 
 h2 {
-  margin: 0 0 5px;
+  margin: 10px 0 5px;
   font-size: 10px;
   font-weight: normal;
   letter-spacing: 0.09em;
@@ -74,6 +128,13 @@ label {
 }
 
 label:hover { color: var(--fg); }
+label.sub { padding-left: 15px; }
+
+.note {
+  margin: 6px 0 0;
+  color: var(--fg-faint);
+  line-height: 1.5;
+}
 
 input[type="checkbox"] {
   appearance: none;
@@ -101,20 +162,10 @@ input[type="range"] {
   cursor: pointer;
 }
 
-input[type="range"]::-webkit-slider-runnable-track {
-  height: 1px;
-  background: var(--line-bright);
-}
-
+input[type="range"]::-webkit-slider-runnable-track { height: 1px; background: var(--line-bright); }
 input[type="range"]::-webkit-slider-thumb {
-  appearance: none;
-  width: 3px;
-  height: 11px;
-  margin-top: -5px;
-  background: var(--fg);
-  border: 0;
+  appearance: none; width: 3px; height: 11px; margin-top: -5px; background: var(--fg); border: 0;
 }
-
 input[type="range"]::-moz-range-track { height: 1px; background: var(--line-bright); }
 input[type="range"]::-moz-range-thumb {
   width: 3px; height: 11px; border: 0; border-radius: 0; background: var(--fg);
@@ -123,7 +174,7 @@ input[type="range"]::-moz-range-thumb {
 label.field { display: flex; justify-content: space-between; align-items: center; }
 
 input[type="number"] {
-  width: 64px;
+  width: 70px;
   padding: 1px 4px;
   color: var(--fg);
   background: #0c0c0c;
@@ -132,21 +183,7 @@ input[type="number"] {
   text-align: right;
 }
 
-.back {
-  display: block;
-  padding: 5px 0;
-  color: var(--fg-dim);
-  background: #0f0f0f;
-  border: 1px solid var(--line-bright);
-  font: inherit;
-  letter-spacing: 0.06em;
-  text-align: center;
-  text-decoration: none;
-}
-
-.back:hover { color: var(--fg); border-color: var(--fg-faint); }
-
-.row { display: flex; gap: 4px; }
+.row { display: flex; gap: 4px; margin-top: 4px; }
 
 button {
   flex: 1;
@@ -160,13 +197,8 @@ button {
 }
 
 button:hover { color: var(--fg); border-color: var(--fg-faint); }
-button.on { color: var(--bg); background: var(--accent); border-color: var(--accent); }
 
-#settingsNote {
-  margin: 4px 0 0;
-  min-height: 13px;
-  color: var(--fg-faint);
-}
+#settingsNote { min-height: 13px; }
 
 #altLegend {
   display: grid;
@@ -178,17 +210,29 @@ button.on { color: var(--bg); background: var(--accent); border-color: var(--acc
 }
 
 #altLegend li { display: flex; align-items: center; color: var(--fg-dim); }
-
-#altLegend i {
-  width: 9px;
-  height: 9px;
-  margin-right: 5px;
-  flex: none;
-}
+#altLegend i { width: 9px; height: 9px; margin-right: 5px; flex: none; }
 
 dl { display: grid; grid-template-columns: auto 1fr; gap: 1px 8px; margin: 0; }
 dt { color: var(--fg-faint); }
 dd { margin: 0; text-align: right; color: var(--fg); overflow-wrap: anywhere; }
+
+/* ----------------------------------------------------------------- stage */
+
+#stage { position: relative; flex: 1; min-width: 0; }
+
+#scene, #slice { display: block; width: 100%; height: 100%; }
+#scene[hidden], #slice[hidden] { display: none; }
+#slice { background: var(--bg); }
+
+#hint {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  color: var(--fg-faint);
+  pointer-events: none;
+  white-space: nowrap;
+}
 
 #attribution {
   position: absolute;
