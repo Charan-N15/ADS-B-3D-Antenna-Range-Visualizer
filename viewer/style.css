@@ -22,7 +22,7 @@
   /* one accent. Chosen to sit well clear of the altitude ramp: it is roughly
      twice as far from the 2k band colour as the band colours are from each
      other, so it reads as chrome rather than as data. */
-  --accent: #f2c57c;
+  --accent: #c49b9b;
   --knob: #878d96;
 
   /* type: sans for labels, mono wherever digits need to line up */
@@ -69,11 +69,11 @@ html, body {
 }
 
 #rail hr {
-  width: 56%;
+  width: 90%;
   height: 0;
   margin: 6px 0;
   border: 0;
-  border-top: 1px solid var(--line);
+  border-top: 5px solid rgb(91, 86, 52); /* i dont even know if this color looks good */
 }
 
 .rail-btn {
@@ -93,8 +93,8 @@ html, body {
 }
 
 .rail-btn svg {
-  width: 18px;
-  height: 18px;
+  width: 25px;
+  height: 25px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.5;
@@ -280,19 +280,19 @@ dd {
 /* ----------------------------------------------------------------- stage */
 
 #panelToggle {
-  width: 14px;
+  width: 15px;
   flex: none;
   padding: 0;
   color: var(--faint);
-  background: var(--rail);
+  background: var(--panel);
   border: 0;
   border-right: 1px solid var(--line);
   border-radius: 0;
-  font: var(--size)/1 var(--sans);
+  font: calc(var(--size) * 3)/1 var(--sans);
   cursor: pointer;
 }
 
-#panelToggle:hover { color: var(--accent); background: var(--panel); }
+#panelToggle:hover { color: yellow; background: rgb(91, 86, 52); }
 
 #stage { position: relative; flex: 1; min-width: 0; }
 
