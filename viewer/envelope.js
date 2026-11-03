@@ -96,6 +96,35 @@ export function bandOf(model, altFt) {
 }
 
 /**
+ * Band indices covering an altitude window, clamped to what exists.
+ *
+ * bandOf returns -1 at or above the top edge, which is correct for a point but
+ * wrong for the upper end of a range — a filter of "up to 50,000 ft" means the
+ * topmost band, not no band at all.
+ */
+export function bandRange(model, minAltFt, maxAltFt) {
+  const top = model.nBands - 1;
+  let lo = bandOf(model, minAltFt);
+  let hi = bandOf(model, maxAltFt);
+  if (lo < 0) lo = minAltFt <= model.edges[0] ? 0 : top;
+  if (hi < 0) hi = maxAltFt <= model.edges[0] ? 0 : top;
+  return lo <= hi ? [lo, hi] : [hi, lo];
+}
+
+/**
+ * Upper edge of the highest band holding any coverage, for scaling things that
+ * should reach as high as the measured data rather than as high as the grid.
+ */
+export function topAltitudeFt(model) {
+  for (let band = model.nBands - 1; band >= 0; band--) {
+    for (let az = 0; az < 360; az++) {
+      if (model.grid[az * model.nBands + band] > 0) return model.edges[band + 1];
+    }
+  }
+  return model.edges[model.nBands];
+}
+
+/**
  * The coverage floor: lowest altitude ever received at this bearing and range.
  * Returns null where nothing has ever been heard that far out.
  */

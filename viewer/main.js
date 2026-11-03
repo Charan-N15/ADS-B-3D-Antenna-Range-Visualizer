@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  loadEnvelope, buildGrid, summarize, cellRecord, rangeAt,
+  loadEnvelope, buildGrid, summarize, cellRecord, rangeAt, topAltitudeFt,
 } from './envelope.js';
 import {
   buildGround, buildEnvelopeSurface, buildContourRings, buildHorizonSurface,
@@ -32,9 +32,12 @@ const DEFAULT_UI = {
   view: 'orbit',
   layers: {
     envelope: true, contours: true, horizon: true, aircraft: true, ground: true,
-    basemap: true,
+    basemap: true, footprint: false,
   },
   mapOpacity: 0.75,
+  extendHorizon: false,
+  altMinFt: 0,
+  altMaxFt: 50000,
   exag: 8,
   curvature: true,
   colorByAlt: true,
@@ -44,6 +47,8 @@ const DEFAULT_UI = {
   rxAltFt: 100,
   sliceAz: 0,
   sliceSpread: 5,
+  section: 'layers',
+  panelCollapsed: false,
 };
 
 // Saved settings are a convenience, never a requirement: if storage is unreadable
@@ -83,6 +88,7 @@ let groundGroup = null;
 let envelopeGroup = null;
 let contourGroup = null;
 let horizonGroup = null;
+let footprintGroup = null;
 let basemap = null;      // loaded tiles and texture, built once
 let basemapMesh = null;  // rebuilt whenever the projection changes
 
@@ -92,7 +98,21 @@ function viewOpts() {
     exag: ui.exag,
     curvature: ui.curvature,
     colorByAlt: ui.colorByAlt,
+    altMinFt: ui.altMinFt,
+    altMaxFt: ui.altMaxFt,
   };
+}
+
+/** True when the altitude filter is showing everything. */
+function altFilterIsOpen() {
+  return ui.altMinFt <= 0 && ui.altMaxFt >= 50000;
+}
+
+/** Live traffic inside the altitude window. */
+function visibleContacts() {
+  if (altFilterIsOpen()) return contacts;
+  return contacts.filter(
+    (c) => c.altFt >= ui.altMinFt && c.altFt <= ui.altMaxFt);
 }
 
 function renderAltitudeLegend() {
@@ -128,6 +148,7 @@ function rebuildScene() {
   disposeGroup(groundGroup);
   disposeGroup(envelopeGroup);
   disposeGroup(contourGroup);
+  disposeGroup(footprintGroup);
   disposeGroup(horizonGroup);
   disposeGroup(basemapMesh);
   basemapMesh = null;
@@ -135,8 +156,11 @@ function rebuildScene() {
   groundGroup = buildGround(maxRangeNm, opts);
   envelopeGroup = buildEnvelopeSurface(model, opts);
   contourGroup = buildContourRings(model, CONTOUR_ALTITUDES, opts);
-  horizonGroup = buildHorizonSurface(maxRangeNm, opts);
-  scene.add(groundGroup, envelopeGroup, contourGroup, horizonGroup);
+  footprintGroup = buildContourRings(model, CONTOUR_ALTITUDES, opts, true);
+  horizonGroup = buildHorizonSurface(
+    maxRangeNm, opts, ui.extendHorizon ? topAltitudeFt(model) : 0);
+  scene.add(groundGroup, envelopeGroup, contourGroup, footprintGroup,
+    horizonGroup);
 
   if (basemap && doc?.rx?.lat != null) {
     const radius = Math.min(maxRangeNm, basemap.meta.radiusNm);
@@ -144,6 +168,9 @@ function rebuildScene() {
     scene.add(basemapMesh);
   }
   applyLayerVisibility();
+  // Re-filtered here as well as on each poll, because changing the altitude
+  // window has to take effect without waiting for the next second of data.
+  aircraftLayer.setContacts(visibleContacts());
   aircraftLayer.update(opts);
 }
 
@@ -152,6 +179,7 @@ function applyLayerVisibility() {
   if (envelopeGroup) envelopeGroup.visible = ui.layers.envelope;
   if (contourGroup) contourGroup.visible = ui.layers.contours;
   if (horizonGroup) horizonGroup.visible = ui.layers.horizon;
+  if (footprintGroup) footprintGroup.visible = ui.layers.footprint;
   if (basemapMesh) basemapMesh.visible = ui.layers.basemap;
   aircraftLayer.group.visible = ui.layers.aircraft;
 }
@@ -227,7 +255,7 @@ async function refreshAircraft() {
       });
     }
     contacts = out;
-    aircraftLayer.setContacts(contacts);
+    aircraftLayer.setContacts(visibleContacts());
     aircraftLayer.update(viewOpts());
   } catch (err) {
     setStatus(`traffic: ${err.message}`, true);
@@ -257,13 +285,15 @@ function renderStats() {
   if (!model) return;
   const s = summarize(model, ui.minHits);
   const days = Math.max(0, (s.updated - s.created) / 86400);
+  // How long it has been collecting sits under the heading rather than in the
+  // list: none of the other numbers mean anything without it.
+  el('collectedSince').textContent = `Collected over ${days.toFixed(1)} days`;
   defList(el('stats'), [
     ['cells', `${s.filled} / ${s.cells}`],
     ['bearings', `${s.bearings} / 360`],
     ['positions', s.samples.toLocaleString()],
     ['max range', `${s.maxRangeNm.toFixed(1)} nm`],
     ['at', `${String(s.maxRangeAz).padStart(3, '0')}° / ${s.maxRangeAltFt.toLocaleString()} ft`],
-    ['collecting', `${days.toFixed(1)} d`],
     ['updated', fmtTime(s.updated)],
   ]);
 }
@@ -271,7 +301,10 @@ function renderStats() {
 function setStatus(text, isError) {
   const node = el('status');
   if (!text) {
-    node.textContent = `${contacts.length} contacts`;
+    const shown = visibleContacts().length;
+    node.textContent = altFilterIsOpen()
+      ? `${contacts.length} contacts`
+      : `${shown} of ${contacts.length} contacts`;
     node.classList.remove('error');
     return;
   }
@@ -315,6 +348,32 @@ function frameCamera() {
   controls.update();
 }
 
+/** Shows one rail section in the panel and lights its rail button. */
+function showSection(name) {
+  // Settings saved by an earlier build can name a section that has since been
+  // merged away; without this the panel would come up blank.
+  if (!document.querySelector(`#panel section[data-sect="${name}"]`)) {
+    name = 'layers';
+  }
+  ui.section = name;
+  for (const node of document.querySelectorAll('#panel section')) {
+    node.hidden = node.dataset.sect !== name;
+  }
+  for (const button of document.querySelectorAll('.rail-btn.sect')) {
+    button.classList.toggle('on', button.dataset.sect === name);
+  }
+}
+
+function setPanelCollapsed(collapsed) {
+  ui.panelCollapsed = collapsed;
+  el('panel').classList.toggle('collapsed', collapsed);
+  const toggle = el('panelToggle');
+  toggle.innerHTML = collapsed ? '&#8250;' : '&#8249;';
+  toggle.title = collapsed ? 'Show the panel' : 'Collapse the panel';
+  // The stage is a flex sibling, so it has just changed width.
+  resize();
+}
+
 function setView(name) {
   ui.view = name;
   for (const button of document.querySelectorAll('button.view')) {
@@ -325,6 +384,13 @@ function setView(name) {
   sceneCanvas.hidden = isSlice;
   el('sliceControls').hidden = !isSlice;
   el('hint').hidden = isSlice;
+
+  // The bearing and spread controls live in the view section, so switching to
+  // slice without opening it would hide the only controls that view has.
+  if (isSlice) {
+    if (ui.panelCollapsed) setPanelCollapsed(false);
+    showSection('view');
+  }
 
   if (name === 'top') {
     camera.up.set(0, 1, 0);
@@ -415,7 +481,11 @@ function applyUiToControls() {
     layerAircraft: ui.layers.aircraft,
     layerGround: ui.layers.ground,
     layerBasemap: ui.layers.basemap,
+    layerFootprint: ui.layers.footprint,
+    // Before extendHorizon, which switches it off: restoring them the other way
+    // round would let curvature undo the extension it was meant to accompany.
     curvature: ui.curvature,
+    extendHorizon: ui.extendHorizon,
     closure: ui.closure,
     colorByAlt: ui.colorByAlt,
   };
@@ -442,7 +512,11 @@ function applyUiToControls() {
   }
 
   el('rxAlt').value = String(ui.rxAltFt);
+  el('altMin').value = String(ui.altMinFt);
+  el('altMax').value = String(ui.altMaxFt);
   el('altLegendGroup').hidden = !ui.colorByAlt;
+  showSection(ui.section);
+  setPanelCollapsed(ui.panelCollapsed);
 }
 
 function note(text) {
@@ -452,6 +526,10 @@ function note(text) {
   note.timer = window.setTimeout(() => { node.textContent = ''; }, 4000);
 }
 
+// Curvature setting from before the extended horizon switched it off, so that
+// turning the extension back off returns the view to where it was.
+let curvatureBeforeExtend = null;
+
 function wireUi() {
   el('backTo2d').href = TAR1090_URL;
 
@@ -459,19 +537,87 @@ function wireUi() {
     button.addEventListener('click', () => setView(button.dataset.view));
   }
 
+  for (const button of document.querySelectorAll('.rail-btn.sect')) {
+    button.addEventListener('click', () => {
+      // Picking a section while the panel is hidden should bring it back,
+      // rather than silently switching something nobody can see.
+      if (ui.panelCollapsed) setPanelCollapsed(false);
+      showSection(button.dataset.sect);
+    });
+  }
+
+  el('panelToggle').addEventListener('click', () => {
+    setPanelCollapsed(!ui.panelCollapsed);
+  });
+
   bindCheckbox('layerEnvelope', (v) => { ui.layers.envelope = v; applyLayerVisibility(); });
   bindCheckbox('layerContours', (v) => { ui.layers.contours = v; applyLayerVisibility(); });
   bindCheckbox('layerHorizon', (v) => { ui.layers.horizon = v; applyLayerVisibility(); });
   bindCheckbox('layerAircraft', (v) => { ui.layers.aircraft = v; applyLayerVisibility(); });
   bindCheckbox('layerGround', (v) => { ui.layers.ground = v; applyLayerVisibility(); });
   bindCheckbox('layerBasemap', (v) => { ui.layers.basemap = v; applyLayerVisibility(); });
+  bindCheckbox('layerFootprint', (v) => {
+    ui.layers.footprint = v; applyLayerVisibility();
+  });
+  // Curvature and the extended horizon cannot both be meaningful. With curvature
+  // on, on-screen height is altitude minus the earth's drop at that range, so two
+  // points at the same altitude but different ranges draw at different heights —
+  // and the extended horizon exists precisely to be compared by altitude. Worse,
+  // the ground falls away faster than the line-of-sight floor climbs, so the
+  // surface sinks instead of rising. They are therefore mutually exclusive, and
+  // turning the extension off restores whatever curvature was set before.
+  bindCheckbox('extendHorizon', (v) => {
+    ui.extendHorizon = v;
+    if (v && ui.curvature) {
+      curvatureBeforeExtend = ui.curvature;
+      ui.curvature = false;
+      el('curvature').checked = false;
+    } else if (!v && curvatureBeforeExtend !== null) {
+      ui.curvature = curvatureBeforeExtend;
+      el('curvature').checked = ui.curvature;
+      curvatureBeforeExtend = null;
+    }
+    onViewOptionChange();
+  });
+
+  const applyAltFilter = () => {
+    let lo = Number(el('altMin').value);
+    let hi = Number(el('altMax').value);
+    if (!Number.isFinite(lo)) lo = 0;
+    if (!Number.isFinite(hi)) hi = 50000;
+    // Crossed values would otherwise filter everything away and look like a bug.
+    if (lo > hi) [lo, hi] = [hi, lo];
+    ui.altMinFt = Math.max(0, Math.min(50000, lo));
+    ui.altMaxFt = Math.max(0, Math.min(50000, hi));
+    el('altMin').value = String(ui.altMinFt);
+    el('altMax').value = String(ui.altMaxFt);
+    onViewOptionChange();
+    setStatus(null);
+  };
+  el('altMin').addEventListener('change', applyAltFilter);
+  el('altMax').addEventListener('change', applyAltFilter);
+  el('altReset').addEventListener('click', () => {
+    el('altMin').value = '0';
+    el('altMax').value = '50000';
+    applyAltFilter();
+  });
 
   bindRange('mapOpacity', 'mapOpacityOut', (v) => `${v}%`, (v) => {
     ui.mapOpacity = v / 100;
     if (basemapMesh) basemapMesh.material.opacity = ui.mapOpacity;
   });
 
-  bindCheckbox('curvature', (v) => { ui.curvature = v; onViewOptionChange(); });
+  bindCheckbox('curvature', (v) => {
+    ui.curvature = v;
+    // Asking for curvature back is a deliberate choice, so it wins and the
+    // extension stands down rather than silently fighting it.
+    if (v && ui.extendHorizon) {
+      ui.extendHorizon = false;
+      el('extendHorizon').checked = false;
+      curvatureBeforeExtend = null;
+    }
+    onViewOptionChange();
+  });
   bindCheckbox('colorByAlt', (v) => {
     ui.colorByAlt = v;
     el('altLegendGroup').hidden = !v;

@@ -16,91 +16,137 @@
 </head>
 <body>
 
-<div id="stage">
-  <canvas id="scene"></canvas>
-  <canvas id="slice" hidden></canvas>
-  <div id="hint">drag to orbit &middot; wheel to zoom &middot; click the surface for the contact that set it</div>
-  <div id="attribution"></div>
-</div>
+<div id="shell">
 
-<div id="panel">
-  <div class="group">
-    <a id="backTo2d" class="back" href="../tar1090/">&larr; RETURN TO 2D</a>
-  </div>
+  <nav id="rail">
+    <button class="rail-btn view on" data-view="orbit" title="Orbit">
+      <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="4.5"/><ellipse cx="9" cy="9" rx="8" ry="3.2"/></svg>
+      <span>Orbit</span>
+    </button>
+    <button class="rail-btn view" data-view="top" title="Top down">
+      <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="2"/><circle cx="9" cy="9" r="5"/><circle cx="9" cy="9" r="8"/></svg>
+      <span>Top</span>
+    </button>
+    <button class="rail-btn view" data-view="slice" title="Bearing slice">
+      <svg viewBox="0 0 18 18"><rect x="1.5" y="4" width="15" height="10"/><path d="M1.5 12.5 L16.5 6"/></svg>
+      <span>Slice</span>
+    </button>
 
-  <div class="group">
-    <div class="row views">
-      <button class="view on" data-view="orbit">ORBIT</button>
-      <button class="view" data-view="top">TOP</button>
-      <button class="view" data-view="slice">SLICE</button>
+    <hr>
+
+    <button class="rail-btn sect on" data-sect="layers" title="Layers">
+      <svg viewBox="0 0 18 18"><path d="M9 2 L16 6 L9 10 L2 6 Z"/><path d="M2 10 L9 14 L16 10"/></svg>
+      <span>Layers</span>
+    </button>
+    <button class="rail-btn sect" data-sect="view" title="View and tuning">
+      <svg viewBox="0 0 18 18"><path d="M2.5 5h13M2.5 9h13M2.5 13h13"/><circle cx="6" cy="5" r="1.8"/><circle cx="12" cy="9" r="1.8"/><circle cx="7.5" cy="13" r="1.8"/></svg>
+      <span>View</span>
+    </button>
+    <button class="rail-btn sect" data-sect="info" title="Envelope info">
+      <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><path d="M9 8.2v4.6M9 5.4v.6"/></svg>
+      <span>Info</span>
+    </button>
+
+    <hr>
+
+    <a class="rail-btn" id="backTo2d" href="../tar1090/" title="Return to the 2D map">
+      <svg viewBox="0 0 18 18"><path d="M11 3.5 L5 9 L11 14.5"/></svg>
+      <span>2D</span>
+    </a>
+  </nav>
+
+  <aside id="panel">
+    <div id="panelBody">
+
+      <section data-sect="layers">
+        <div class="grp">
+          <h2>Layers</h2>
+          <label><input type="checkbox" id="layerEnvelope" checked> Envelope surface</label>
+          <label><input type="checkbox" id="layerContours" checked> Altitude rings</label>
+          <label><input type="checkbox" id="layerHorizon" checked> Theoretical horizon</label>
+          <label class="sub"><input type="checkbox" id="extendHorizon"> Extend to top</label>
+          <label><input type="checkbox" id="layerFootprint"> Ground footprint</label>
+          <label><input type="checkbox" id="layerAircraft" checked> Live traffic</label>
+          <label><input type="checkbox" id="layerGround" checked> Range rings</label>
+          <label><input type="checkbox" id="layerBasemap" checked> Map</label>
+          <label class="slider">Map level <span id="mapOpacityOut">75%</span>
+            <input type="range" id="mapOpacity" min="0" max="100" step="5" value="75"></label>
+        </div>
+
+        <div class="grp" id="altLegendGroup">
+          <h2>Altitude</h2>
+          <ul id="altLegend"></ul>
+        </div>
+      </section>
+
+      <section data-sect="view" hidden>
+        <div class="grp">
+          <h2>View</h2>
+          <label><input type="checkbox" id="curvature" checked> Earth curvature</label>
+          <label><input type="checkbox" id="colorByAlt" checked> Colour by altitude</label>
+          <label><input type="checkbox" id="closure" checked> Altitude closure</label>
+          <label class="slider">Vertical <span id="exagOut">8&times;</span>
+            <input type="range" id="exag" min="1" max="24" step="1" value="8"></label>
+          <label class="slider">Smooth <span id="smoothOut">5&deg;</span>
+            <input type="range" id="smooth" min="1" max="15" step="2" value="5"></label>
+          <label class="slider">Min hits <span id="hitsOut">2</span>
+            <input type="range" id="hits" min="1" max="6" step="1" value="2"></label>
+          <label class="field">Antenna ft
+            <input type="number" id="rxAlt" min="0" max="10000" step="10" value="100"></label>
+        </div>
+
+        <div class="grp">
+          <h2>Altitude filter</h2>
+          <label class="field">From ft
+            <input type="number" id="altMin" min="0" max="50000" step="500" value="0"></label>
+          <label class="field">To ft
+            <input type="number" id="altMax" min="0" max="50000" step="500" value="50000"></label>
+          <div class="row"><button id="altReset">Show all</button></div>
+        </div>
+
+        <div class="grp" id="sliceControls" hidden>
+          <h2>Slice</h2>
+          <label class="slider">Bearing <span id="azOut">000&deg;</span>
+            <input type="range" id="sliceAz" min="0" max="359" step="1" value="0"></label>
+          <label class="slider">Spread <span id="spreadOut">&plusmn;5&deg;</span>
+            <input type="range" id="sliceSpread" min="0" max="30" step="1" value="5"></label>
+        </div>
+      </section>
+
+      <section data-sect="info" hidden>
+        <div class="grp">
+          <h2>Envelope</h2>
+          <p class="since" id="collectedSince"></p>
+          <dl id="stats"></dl>
+        </div>
+        <div class="grp" id="pickGroup" hidden>
+          <h2>Selected cell</h2>
+          <dl id="pick"></dl>
+        </div>
+      </section>
+
     </div>
-  </div>
 
-  <div class="group">
-    <h2>layers</h2>
-    <label><input type="checkbox" id="layerEnvelope" checked> envelope surface</label>
-    <label><input type="checkbox" id="layerContours" checked> altitude rings</label>
-    <label><input type="checkbox" id="layerHorizon" checked> theoretical horizon</label>
-    <label><input type="checkbox" id="layerAircraft" checked> live traffic</label>
-    <label><input type="checkbox" id="layerGround" checked> range rings</label>
-    <label><input type="checkbox" id="layerBasemap" checked> map</label>
-    <label class="slider">map level <span id="mapOpacityOut">75%</span>
-      <input type="range" id="mapOpacity" min="0" max="100" step="5" value="75"></label>
-  </div>
-
-  <div class="group">
-    <h2>view</h2>
-    <label class="slider">vertical <span id="exagOut">8&times;</span>
-      <input type="range" id="exag" min="1" max="24" step="1" value="8"></label>
-    <label><input type="checkbox" id="curvature" checked> earth curvature</label>
-    <label><input type="checkbox" id="colorByAlt" checked> colour by altitude</label>
-  </div>
-
-  <div class="group" id="altLegendGroup">
-    <h2>altitude</h2>
-    <ul id="altLegend"></ul>
-  </div>
-
-  <div class="group">
-    <h2>data</h2>
-    <label class="slider">smooth <span id="smoothOut">5&deg;</span>
-      <input type="range" id="smooth" min="1" max="15" step="2" value="5"></label>
-    <label class="slider">min hits <span id="hitsOut">2</span>
-      <input type="range" id="hits" min="1" max="6" step="1" value="2"></label>
-    <label><input type="checkbox" id="closure" checked> altitude closure</label>
-    <label class="field">antenna ft
-      <input type="number" id="rxAlt" min="0" max="10000" step="10" value="100"></label>
-  </div>
-
-  <div class="group" id="sliceControls" hidden>
-    <h2>slice</h2>
-    <label class="slider">bearing <span id="azOut">000&deg;</span>
-      <input type="range" id="sliceAz" min="0" max="359" step="1" value="0"></label>
-    <label class="slider">spread <span id="spreadOut">&plusmn;5&deg;</span>
-      <input type="range" id="sliceSpread" min="0" max="30" step="1" value="5"></label>
-  </div>
-
-  <div class="group">
-    <h2>settings</h2>
-    <div class="row">
-      <button id="saveSettings">SAVE VIEW</button>
-      <button id="resetSettings">RESET</button>
+    <div id="panelFooter">
+      <div class="row">
+        <button id="saveSettings">Save view</button>
+        <button id="resetSettings">Reset</button>
+      </div>
+      <p id="settingsNote"></p>
     </div>
-    <p id="settingsNote"></p>
+  </aside>
+
+  <button id="panelToggle" title="Collapse the panel">&#8249;</button>
+
+  <div id="stage">
+    <canvas id="scene"></canvas>
+    <canvas id="slice" hidden></canvas>
+    <div id="hint">drag to orbit &middot; wheel to zoom &middot; click the surface for the contact that set it</div>
+    <div id="attribution"></div>
+    <div id="status"></div>
   </div>
 
-  <div class="group">
-    <h2>envelope</h2>
-    <dl id="stats"></dl>
-  </div>
-
-  <div class="group" id="pickGroup" hidden>
-    <h2>selected cell</h2>
-    <dl id="pick"></dl>
-  </div>
 </div>
-
-<div id="status"></div>
 
 <script type="module" src="main.js"></script>
 </body>
