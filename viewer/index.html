@@ -63,15 +63,15 @@
           <h2>Layers</h2>
           <label><input type="checkbox" id="layerEnvelope" checked> Envelope surface</label>
           <label><input type="checkbox" id="layerContours" checked> Altitude rings</label>
-          <label><input type="checkbox" id="layerHorizon" checked> Theoretical horizon</label>
+          <label><input type="checkbox" id="layerHorizon"> Theoretical horizon</label>
           <label class="sub"><input type="checkbox" id="extendHorizon"> Extend to top</label>
-          <label><input type="checkbox" id="layerFootprint"> Ground footprint</label>
+          <label><input type="checkbox" id="layerFootprint" checked> Ground footprint</label>
           <label><input type="checkbox" id="layerAircraft3d" checked> Live traffic 3D</label>
-          <label><input type="checkbox" id="layerAircraft2d" checked> Live traffic 2D</label>
+          <label><input type="checkbox" id="layerAircraft2d"> Live traffic 2D</label>
           <label><input type="checkbox" id="layerGround" checked> Range rings</label>
           <label><input type="checkbox" id="layerBasemap" checked> Map</label>
-          <label class="slider">Map level <span id="mapOpacityOut">75%</span>
-            <input type="range" id="mapOpacity" min="0" max="100" step="5" value="75"></label>
+          <label class="slider">Map level <span id="mapOpacityOut">100%</span>
+            <input type="range" id="mapOpacity" min="0" max="100" step="5" value="100"></label>
         </div>
 
         <div class="grp" id="altLegendGroup">
@@ -88,10 +88,10 @@
           <label><input type="checkbox" id="closure" checked> Altitude closure</label>
           <label class="slider">Vertical <span id="exagOut">8&times;</span>
             <input type="range" id="exag" min="1" max="24" step="1" value="8"></label>
-          <label class="slider">Smooth <span id="smoothOut">5&deg;</span>
-            <input type="range" id="smooth" min="1" max="15" step="2" value="5"></label>
-          <label class="slider">Min hits <span id="hitsOut">2</span>
-            <input type="range" id="hits" min="1" max="6" step="1" value="2"></label>
+          <label class="slider">Smooth <span id="smoothOut">7&deg;</span>
+            <input type="range" id="smooth" min="1" max="15" step="2" value="7"></label>
+          <label class="slider">Min hits <span id="hitsOut">1</span>
+            <input type="range" id="hits" min="1" max="6" step="1" value="1"></label>
           <label class="field">Antenna ft
             <input type="number" id="rxAlt" min="0" max="10000" step="10" value="100"></label>
         </div>
