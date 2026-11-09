@@ -31,8 +31,8 @@ const el = (id) => document.getElementById(id);
 const DEFAULT_UI = {
   view: 'orbit',
   layers: {
-    envelope: true, contours: true, horizon: true, aircraft: true, ground: true,
-    basemap: true, footprint: false,
+    envelope: true, contours: true, horizon: true, ground: true,
+    basemap: true, footprint: false, aircraft3d: true, aircraft2d: true,
   },
   mapOpacity: 0.75,
   extendHorizon: false,
@@ -56,6 +56,16 @@ const DEFAULT_UI = {
 const savedSettings = loadSettings();
 const hasSavedSettings = savedSettings !== null;
 const ui = mergeSettings(DEFAULT_UI, savedSettings);
+
+// Up to v1.1 live traffic was one layer. mergeSettings drops keys it does not
+// know, so without this a saved view with traffic switched off would come back
+// with both halves on.
+if (savedSettings && savedSettings.layers
+    && typeof savedSettings.layers.aircraft === 'boolean'
+    && savedSettings.layers.aircraft3d === undefined) {
+  ui.layers.aircraft3d = savedSettings.layers.aircraft;
+  ui.layers.aircraft2d = savedSettings.layers.aircraft;
+}
 
 let doc = null;        // raw envelope state
 let model = null;      // gridded form
@@ -181,7 +191,7 @@ function applyLayerVisibility() {
   if (horizonGroup) horizonGroup.visible = ui.layers.horizon;
   if (footprintGroup) footprintGroup.visible = ui.layers.footprint;
   if (basemapMesh) basemapMesh.visible = ui.layers.basemap;
-  aircraftLayer.group.visible = ui.layers.aircraft;
+  aircraftLayer.setVisibility(ui.layers.aircraft3d, ui.layers.aircraft2d);
 }
 
 async function initBasemap() {
@@ -478,7 +488,8 @@ function applyUiToControls() {
     layerEnvelope: ui.layers.envelope,
     layerContours: ui.layers.contours,
     layerHorizon: ui.layers.horizon,
-    layerAircraft: ui.layers.aircraft,
+    layerAircraft3d: ui.layers.aircraft3d,
+    layerAircraft2d: ui.layers.aircraft2d,
     layerGround: ui.layers.ground,
     layerBasemap: ui.layers.basemap,
     layerFootprint: ui.layers.footprint,
@@ -553,7 +564,8 @@ function wireUi() {
   bindCheckbox('layerEnvelope', (v) => { ui.layers.envelope = v; applyLayerVisibility(); });
   bindCheckbox('layerContours', (v) => { ui.layers.contours = v; applyLayerVisibility(); });
   bindCheckbox('layerHorizon', (v) => { ui.layers.horizon = v; applyLayerVisibility(); });
-  bindCheckbox('layerAircraft', (v) => { ui.layers.aircraft = v; applyLayerVisibility(); });
+  bindCheckbox('layerAircraft3d', (v) => { ui.layers.aircraft3d = v; applyLayerVisibility(); });
+  bindCheckbox('layerAircraft2d', (v) => { ui.layers.aircraft2d = v; applyLayerVisibility(); });
   bindCheckbox('layerGround', (v) => { ui.layers.ground = v; applyLayerVisibility(); });
   bindCheckbox('layerBasemap', (v) => { ui.layers.basemap = v; applyLayerVisibility(); });
   bindCheckbox('layerFootprint', (v) => {

@@ -285,6 +285,29 @@ export function buildHorizonSurface(maxRangeNm, opts, extendToAltFt) {
   return group;
 }
 
+/** Ring sprite for the ground marks. Vertex colours multiply the texture, so the
+    white ring takes its aircraft's altitude colour while the black edges stay
+    black whatever that colour is — which is what keeps it legible over tiles. */
+let groundSprite = null;
+function groundMarkTexture() {
+  if (groundSprite) return groundSprite;
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  // Widest first, so the black band is left showing on both sides of the white.
+  for (const [width, style] of [[20, '#000'], [10, '#fff']]) {
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, 22, 0, Math.PI * 2);
+    ctx.lineWidth = width;
+    ctx.strokeStyle = style;
+    ctx.stroke();
+  }
+  groundSprite = new THREE.CanvasTexture(canvas);
+  return groundSprite;
+}
+
 /** Live traffic: a point per aircraft plus a drop line to the surface below it. */
 export class AircraftLayer {
   constructor(capacity = 600) {
@@ -314,7 +337,27 @@ export class AircraftLayer {
     }));
     this.drops.frustumCulled = false;
 
-    this.group.add(this.points, this.drops);
+    // Shares the colour attribute with the points above, so each mark carries
+    // its own aircraft's altitude colour without a second colour buffer.
+    this.groundPositions = new Float32Array(capacity * 3);
+    const groundGeom = new THREE.BufferGeometry();
+    groundGeom.setAttribute('position',
+      new THREE.BufferAttribute(this.groundPositions, 3));
+    groundGeom.setAttribute('color', pointGeom.getAttribute('color'));
+    this.marks = new THREE.Points(groundGeom, new THREE.PointsMaterial({
+      color: COLORS.aircraft, map: groundMarkTexture(), size: 12,
+      sizeAttenuation: false, transparent: true, depthWrite: false,
+    }));
+    this.marks.frustumCulled = false;
+
+    this.group.add(this.points, this.drops, this.marks);
+  }
+
+  /** The pin standing above the map and the mark lying on it toggle apart. */
+  setVisibility(show3d, show2d) {
+    this.points.visible = show3d;
+    this.drops.visible = show3d;
+    this.marks.visible = show2d;
   }
 
   /** contacts: [{hex, flight, az, rangeNm, altFt, ...}] */
@@ -328,6 +371,9 @@ export class AircraftLayer {
     this.points.material.vertexColors = byAlt;
     this.points.material.color.set(byAlt ? 0xffffff : COLORS.aircraft);
     this.points.material.needsUpdate = true;
+    this.marks.material.vertexColors = byAlt;
+    this.marks.material.color.set(byAlt ? 0xffffff : COLORS.aircraft);
+    this.marks.material.needsUpdate = true;
 
     const n = this.contacts.length;
     for (let i = 0; i < n; i++) {
@@ -341,6 +387,9 @@ export class AircraftLayer {
       this.pointColors[i * 3 + 1] = tint.g;
       this.pointColors[i * 3 + 2] = tint.b;
       const [gx, gy, gz] = project(c.az, c.rangeNm, 0, opts);
+      this.groundPositions[i * 3] = gx;
+      this.groundPositions[i * 3 + 1] = gy;
+      this.groundPositions[i * 3 + 2] = gz;
       this.dropPositions[i * 6] = x;
       this.dropPositions[i * 6 + 1] = y;
       this.dropPositions[i * 6 + 2] = z;
@@ -353,6 +402,8 @@ export class AircraftLayer {
     this.points.geometry.attributes.color.needsUpdate = true;
     this.drops.geometry.setDrawRange(0, n * 2);
     this.drops.geometry.attributes.position.needsUpdate = true;
+    this.marks.geometry.setDrawRange(0, n);
+    this.marks.geometry.attributes.position.needsUpdate = true;
   }
 }
 
