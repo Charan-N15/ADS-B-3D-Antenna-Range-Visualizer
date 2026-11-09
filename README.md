@@ -44,8 +44,7 @@ sudo ./install.sh --base-url http://localhost/adsbx
 If the viewer still cannot find tar1090, ?tar1090= and ?aircraft= override the path:
 `http://your-pi/range3d/?tar1090=/adsbx/`
 
-**The envelope starts empty, and your antenna range will carve itself out over a few days, once you receive enough data from aircraft.
-**
+**The envelope starts empty, and your antenna range will carve itself out over a few days, once you receive enough data from aircraft.**
 ## Docker
 
 If your tar1090 runs in a container, such as the [sdr-enthusiasts ultrafeeder](https://github.com/sdr-enthusiasts/docker-adsb-ultrafeeder) stack, use this instead of `install.sh`. One container runs the collector, serves the viewer, and proxies tar1090.
