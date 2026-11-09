@@ -22,7 +22,7 @@
 
 set -euo pipefail
 
-BASE_URL=http://localhost/tar1090
+BASE_URL=""
 ANTENNA_FT=""
 RADIUS_NM=250
 ZOOM=8
@@ -67,6 +67,15 @@ done
 command -v python3 >/dev/null || die "python3 is required"
 command -v systemctl >/dev/null || die "this installer expects systemd"
 
+# With no --base-url, reuse the one a previous install recorded. Without this the
+# documented `git pull && sudo ./install.sh` would quietly move the viewer back to
+# /tar1090/ on a receiver that serves tar1090 from somewhere else.
+if [ -z "$BASE_URL" ] && [ -f "$DEFAULTS" ]; then
+  BASE_URL="$(sed -n 's|^RANGE3D_BASE_URL="--base-url \(.*\)"$|\1|p' "$DEFAULTS" | head -1)"
+  case "$BASE_URL" in *__BASE_URL__*) BASE_URL="" ;; esac
+  [ -n "$BASE_URL" ] && say "reusing the recorded base URL $BASE_URL"
+fi
+BASE_URL="${BASE_URL:-http://localhost/tar1090}"
 BASE_URL="${BASE_URL%/}"
 RECEIVER_JSON="$(curl -fsS --max-time 10 "$BASE_URL/data/receiver.json" 2>/dev/null || true)"
 if [ -z "$RECEIVER_JSON" ]; then
@@ -147,6 +156,23 @@ fi
 # ------------------------------------------------------------------------- viewer
 install -d -m 0755 "$WEB_DIR"
 cp -r "$SRC_DIR/viewer/." "$WEB_DIR"/
+
+# The viewer runs in a browser, so it needs the path tar1090 is served from rather
+# than this script's URL for it: localhost is the Pi here, but is the user's own
+# machine in their browser. A base URL on any other host is kept whole.
+VIEWER_TAR1090="$(printf '%s' "$BASE_URL" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://(localhost|127\.0\.0\.1)(:[0-9]+)?##')"
+if [ "$VIEWER_TAR1090" = "$BASE_URL" ]; then
+  : # not a local host, so a bare path would point the browser at the wrong machine
+elif [ -z "$VIEWER_TAR1090" ]; then
+  VIEWER_TAR1090=/
+fi
+VIEWER_TAR1090="${VIEWER_TAR1090%/}/"
+cat > "$WEB_DIR/config.js" <<CONFIG
+// Where tar1090 is served from, as the browser sees it.
+// Written by install.sh from --base-url; re-running the installer rewrites it.
+export const TAR1090_PATH = '$VIEWER_TAR1090';
+CONFIG
+say "the viewer will read tar1090 from $VIEWER_TAR1090"
 find "$WEB_DIR" -type d -exec chmod 0755 {} +
 find "$WEB_DIR" -type f -exec chmod 0644 {} +
 say "installed the viewer into $WEB_DIR"
