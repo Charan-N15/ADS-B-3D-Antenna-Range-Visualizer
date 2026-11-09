@@ -45,6 +45,14 @@ It reads your receiver position from tar1090, installs a collector service, down
 
 Then open `http://your-pi/range3d/`.
 
+If tar1090 is NOT served at /tar1090/ (some feeders might use something like /adsbx/) then use the --`base-url` flag to tell the installer where it is
+```
+sudo ./install.sh --base-url http://localhost/adsbx
+```
+
+If the viewer still cannot find tar1090, ?tar1090= and ?aircraft= override the path:
+`http://your-pi/range3d/?tar1090=/adsbx/`
+
 The envelope starts empty, and your antenna range will carve itself out over a few days, once you receive enough data from aircraft.
 
 ## Docker
@@ -79,7 +87,7 @@ The `3D` button is not added in this mode, because tar1090's files belong to the
 
 ## Configuration
 
-For an `install.sh` install, settings live in `/etc/default/range3d`.
+`sudo ./install.sh --help` lists other helpful options available when installing.
 
 ## Updating
 
@@ -88,13 +96,15 @@ git pull
 sudo ./install.sh
 ```
 
-Collected data will not get rewritten if you run `install.sh` again
+Collected data will not get rewritten if you run `install.sh` again.
 
 ## Uninstall
 
 ```bash
 sudo ./uninstall.sh --purge
 ```
+
+If you would like to update your antenna location and create a new range envelope, you can run the uninstall and install scripts in succession.
 
 ## Credits
 
