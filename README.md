@@ -13,19 +13,10 @@ This shows coverage as a volume rather than a polygon, so you can actually see t
 ## Features
 
 - One button in tar1090 opens the 3D viewer
-- Maximum range per 1° bearing across 49 altitude bands, surface to 50,000 ft
 - Live aircraft rendered inside the envelope
 - The same OpenStreetMap and altitude colours tar1090 already uses
 - Click the surface to see the aircraft that set that record
 - Saved view settings
-
-## Modes
-
-**Orbit**: the envelope as a surface you can spin.
-
-**Top**: straight down.
-
-**Slice**: a vertical cross-section.
 
 ## Requirements
 
@@ -53,11 +44,11 @@ sudo ./install.sh --base-url http://localhost/adsbx
 If the viewer still cannot find tar1090, ?tar1090= and ?aircraft= override the path:
 `http://your-pi/range3d/?tar1090=/adsbx/`
 
-The envelope starts empty, and your antenna range will carve itself out over a few days, once you receive enough data from aircraft.
-
+**The envelope starts empty, and your antenna range will carve itself out over a few days, once you receive enough data from aircraft.
+**
 ## Docker
 
-If your tar1090 runs in a container, such as the [sdr-enthusiasts ultrafeeder](https://github.com/sdr-enthusiasts/docker-adsb-ultrafeeder) stack, use this instead of `install.sh`. One container runs the collector, serves the viewer, and proxies tar1090 so live aircraft and `RETURN TO 2D` work from the same address.
+If your tar1090 runs in a container, such as the [sdr-enthusiasts ultrafeeder](https://github.com/sdr-enthusiasts/docker-adsb-ultrafeeder) stack, use this instead of `install.sh`. One container runs the collector, serves the viewer, and proxies tar1090.
 
 Add it to the `docker-compose.yml` that runs tar1090:
 
@@ -83,7 +74,9 @@ Then open `http://your-docker-host:8099/`. It seeds from tar1090's range outline
 
 Settings are listed at the top of `docker/entrypoint.sh`.
 
-The `3D` button is not added in this mode, because tar1090's files belong to the other container. To move an existing bare-metal install across, copy `/var/lib/range3d/envelope.json` into the data directory before the first start and it will be kept.
+The `3D` button is not added in this mode, because tar1090's files belong to the other container. 
+
+To move an existing install (an install that used `./install.sh`) across, copy `/var/lib/range3d/envelope.json` into the data directory before the first start and it will be kept.
 
 ## Configuration
 
@@ -96,7 +89,7 @@ git pull
 sudo ./install.sh
 ```
 
-Collected data will not get rewritten if you run `install.sh` again.
+Collected data will not be rewritten if you run `install.sh` again.
 
 ## Uninstall
 
