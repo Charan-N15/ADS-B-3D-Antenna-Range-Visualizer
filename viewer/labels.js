@@ -3,9 +3,9 @@
 // Drawn flat on a 2D canvas laid over the 3D scene rather than inside it, so the
 // text stays sharp and the same size on screen however far the camera is pulled
 // back, the same way the aircraft themselves are kept a fixed size. Each frame
-// every aircraft's position is projected to the screen and its box hung off it
-// up and to the right on a short leader line. Always that corner: a box that
-// hopped to whichever side was free would hop every time the view turned.
+// every aircraft's position is projected to the screen and its box set against
+// it, up and to the right. Always that corner: a box that hopped to whichever
+// side was free would hop every time the view turned.
 
 import * as THREE from 'three';
 
@@ -14,11 +14,8 @@ const LINE_PX = 14;
 const PAD_X = 5;
 const PAD_Y = 3;
 
-/** Where the leader leaves the aircraft, as a share of its half-size. */
-const LEADER_START = 0.6;
-
-/** How far the leader runs, up and to the right, before it meets the box. */
-const LEADER_PX = 10;
+/** Clear space between the aircraft and its box, beyond half the aircraft's size. */
+const GAP_PX = 2;
 
 /** Climbing or descending faster than this, feet a minute, earns an arrow. Matches the pitch. */
 const LEVEL_FPM = 150;
@@ -28,9 +25,8 @@ const EMERGENCY_SQUAWKS = new Set(['7500', '7600', '7700']);
 
 const STYLE = {
   font: `${FONT_PX}px ui-monospace, "DejaVu Sans Mono", Consolas, monospace`,
-  fill: 'rgba(15, 16, 18, 0.6)',
+  fill: 'rgba(15, 16, 18, 0.5)',
   edge: '#3c414a',
-  leader: '#767c85',
   text: '#f2f3f5',
   alert: '#ff6a5e',
 };
@@ -128,7 +124,7 @@ export class LabelLayer {
     ctx.textBaseline = 'top';
     this.dirty = true;
 
-    const start = planePx / 2 * LEADER_START;
+    const gap = planePx / 2 + GAP_PX;
     const items = [];
     const { contacts, headPositions } = layer;
     for (let i = 0; i < contacts.length; i++) {
@@ -158,17 +154,8 @@ export class LabelLayer {
 
     ctx.lineWidth = 1;
     for (const { x, y, w, h, lines, alert } of items) {
-      const x0 = x + start;
-      const y0 = y - start;
-      const bx = Math.round(x0 + LEADER_PX);
-      const by = Math.round(y0 - LEADER_PX) - h;
-
-      ctx.strokeStyle = alert ? STYLE.alert : STYLE.leader;
-      ctx.beginPath();
-      ctx.moveTo(x0, y0);
-      ctx.lineTo(bx + 0.5, by + h - 0.5);
-      ctx.stroke();
-
+      const bx = Math.round(x + gap);
+      const by = Math.round(y - gap) - h;
       ctx.fillStyle = STYLE.fill;
       ctx.fillRect(bx, by, w, h);
       ctx.strokeStyle = alert ? STYLE.alert : STYLE.edge;

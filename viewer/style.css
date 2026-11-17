@@ -296,7 +296,7 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 /* What a label will look like, drawn the way the scene draws it. */
 .labelPreview {
   position: relative;
-  height: 60px;
+  height: 54px;
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -312,24 +312,13 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   transform: rotate(45deg);
 }
 
-.labelPreviewLeader {
-  position: absolute;
-  left: 20px;
-  bottom: 11px;
-  width: 14px;
-  height: 1px;
-  background: var(--faint);
-  transform: rotate(-45deg);
-  transform-origin: left center;
-}
-
 .labelPreviewBox {
   position: absolute;
-  left: 30px;
-  bottom: 21px;
+  left: 25px;
+  bottom: 10px;
   padding: 3px 5px;
   color: var(--fg);
-  background: rgba(15, 16, 18, 0.6);
+  background: rgba(15, 16, 18, 0.5);
   border: 1px solid var(--ctl);
   font: 12px/14px var(--mono);
   white-space: pre;
@@ -337,8 +326,8 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 
 .labelPreviewEmpty {
   position: absolute;
-  left: 30px;
-  bottom: 21px;
+  left: 25px;
+  bottom: 10px;
   color: var(--faint);
   font-size: var(--size-small);
 }
