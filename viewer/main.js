@@ -17,10 +17,10 @@ import {
 import { SliceView } from './slice.js';
 import { TAR1090_PATH } from './config.js';
 import { initTypes, typeOf, shapeFor } from './types.js';
-import { LabelLayer, LABEL_PRESETS, presetIndex, labelLines } from './labels.js';
+import { LabelLayer, DEFAULT_LABEL_FIELDS, labelLines } from './labels.js';
 import { PLANE_PX } from './shapes.js';
 import {
-  loadHeatmap, buildTubeTexture, buildHeatVolume, summarizeHeat,
+  loadHeatmap, buildTubeTexture, buildHeatVolume, summarizeHeat, hitsForBusiest,
 } from './heat.js';
 
 const params = new URLSearchParams(location.search);
@@ -50,8 +50,8 @@ const DEFAULT_UI = {
     basemap: true, footprint: true, aircraft3d: true,
     heat: false, labels: false,
   },
-  labelFields: { ...LABEL_PRESETS[1] },
-  heatMinHits: 1000,
+  labelFields: { ...DEFAULT_LABEL_FIELDS },
+  heatBusiestPct: 30,
   extendHorizon: false,
   altMinFt: 0,
   altMaxFt: 50000,
@@ -234,13 +234,15 @@ function rebuildHeat() {
   disposeGroup(heatVolume);
   heatVolume = null;
   if (!heat) return;
-  // The tubes depend on the data, on which routes pass the minimum hits, and on
-  // the exaggeration, which sets how tall a round tube is in feet. The altitude
-  // window and colour mode are applied by the shader, so they rebuild nothing.
-  const key = `${heat.meta.updated}|${ui.heatMinHits}|${ui.exag}`;
+  // The tubes depend on the data, on which routes are busy enough to show, and
+  // on the exaggeration, which sets how tall a round tube is in feet. The
+  // altitude window and colour mode are applied by the shader, so they rebuild
+  // nothing.
+  const minHits = hitsForBusiest(heat, ui.heatBusiestPct);
+  const key = `${heat.meta.updated}|${minHits}|${ui.exag}`;
   if (heatVolumeKey !== key) {
     if (heatVolumeTex) heatVolumeTex.dispose();
-    heatVolumeTex = buildTubeTexture(heat, { minHits: ui.heatMinHits, exag: ui.exag });
+    heatVolumeTex = buildTubeTexture(heat, { minHits, exag: ui.exag });
     heatVolumeKey = key;
   }
   heatVolume = buildHeatVolume(heatVolumeTex, viewOpts());
@@ -636,31 +638,6 @@ function renderLabelFields() {
   el('labelPreviewEmpty').hidden = lines.length > 0;
 }
 
-function setLabelsShown(on) {
-  const box = el('layerLabels');
-  if (box.checked === on) return;
-  box.checked = on;
-  box.dispatchEvent(new Event('change'));
-}
-
-/** O: the next preset after the one showing, or the first after a mix of one's own. */
-function cycleLabelPreset() {
-  const next = (presetIndex(ui.labelFields) + 1) % LABEL_PRESETS.length;
-  ui.labelFields = { ...LABEL_PRESETS[next] };
-  renderLabelFields();
-  // Pressing O with labels off would otherwise appear to do nothing.
-  setLabelsShown(true);
-}
-
-/** Keys typed into a text or number box are that box's, not shortcuts. */
-function isTyping(target) {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') {
-    return true;
-  }
-  return target.tagName === 'INPUT'
-    && !['checkbox', 'range', 'button', 'radio'].includes(target.type);
-}
 
 // ------------------------------------------------------------------------- UI
 
@@ -679,17 +656,17 @@ function bindCheckbox(id, apply) {
 }
 
 /**
- * The heat threshold's slider stops. Busy cells hold thousands of hits and quiet
- * ones a handful, so evenly spaced steps would spend the whole slider on one end;
- * these go up by roughly doubling instead.
+ * The heat's slider stops, as the busiest share of routes shown. Finer at the
+ * busy end, where a few percent is the difference between one approach and all
+ * of them.
  */
-const HEAT_HITS_STEPS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
+const HEAT_PCT_STEPS = [1, 2, 5, 10, 15, 20, 30, 40, 50, 75, 100];
 
-/** The slider stop nearest a saved threshold. */
-function heatHitsStep(hits) {
+/** The slider stop nearest a saved share. */
+function heatPctStep(pct) {
   let best = 0;
-  HEAT_HITS_STEPS.forEach((v, i) => {
-    if (Math.abs(Math.log(v / hits)) < Math.abs(Math.log(HEAT_HITS_STEPS[best] / hits))) best = i;
+  HEAT_PCT_STEPS.forEach((v, i) => {
+    if (Math.abs(v - pct) < Math.abs(HEAT_PCT_STEPS[best] - pct)) best = i;
   });
   return best;
 }
@@ -745,7 +722,7 @@ function applyUiToControls() {
     exag: ui.exag,
     smooth: ui.smoothDeg,
     hits: ui.minHits,
-    heatHits: heatHitsStep(ui.heatMinHits),
+    heatPct: heatPctStep(ui.heatBusiestPct),
     sliceAz: ui.sliceAz,
     sliceSpread: ui.sliceSpread,
   };
@@ -809,13 +786,13 @@ function wireUi() {
     }
     applyLayerVisibility();
   });
-  // Labels hang off the traffic, so their switch sits under it and goes with it.
-  bindCheckbox('layerAircraft3d', (v) => {
-    ui.layers.aircraft3d = v;
-    el('labelsRow').hidden = !v;
-    applyLayerVisibility();
+  bindCheckbox('layerAircraft3d', (v) => { ui.layers.aircraft3d = v; applyLayerVisibility(); });
+  // The label fields only mean anything while labels are showing, so they open
+  // out under the switch, the same as the heat's threshold below.
+  bindCheckbox('layerLabels', (v) => {
+    ui.layers.labels = v;
+    el('labelsBody').hidden = !v;
   });
-  bindCheckbox('layerLabels', (v) => { ui.layers.labels = v; });
   for (const button of document.querySelectorAll('#labelFields button')) {
     button.addEventListener('click', () => {
       const field = button.dataset.field;
@@ -823,20 +800,6 @@ function wireUi() {
       renderLabelFields();
     });
   }
-
-  // The same keys as tar1090: L for labels, O for how much they say.
-  window.addEventListener('keydown', (ev) => {
-    if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.repeat || isTyping(ev.target)) return;
-    const key = ev.key.toLowerCase();
-    if (key === 'l') {
-      setLabelsShown(!ui.layers.labels);
-    } else if (key === 'o') {
-      cycleLabelPreset();
-    } else {
-      return;
-    }
-    ev.preventDefault();
-  });
   bindCheckbox('layerGround', (v) => { ui.layers.ground = v; applyLayerVisibility(); });
   bindCheckbox('layerBasemap', (v) => { ui.layers.basemap = v; applyLayerVisibility(); });
   bindCheckbox('layerFootprint', (v) => {
@@ -847,7 +810,7 @@ function wireUi() {
   // it comes back at the same setting.
   bindCheckbox('layerHeat', (v) => {
     ui.layers.heat = v;
-    el('heatHitsRow').hidden = !v;
+    el('heatBody').hidden = !v;
     applyLayerVisibility();
   });
   // Curvature and the extended horizon cannot both be meaningful. With curvature
@@ -925,8 +888,8 @@ function wireUi() {
   bindRange('hits', 'hitsOut', (v) => String(v), (v) => {
     ui.minHits = v; onDataOptionChange();
   });
-  bindRange('heatHits', 'heatHitsOut', (v) => HEAT_HITS_STEPS[v].toLocaleString(), (v) => {
-    ui.heatMinHits = HEAT_HITS_STEPS[v];
+  bindRange('heatPct', 'heatPctOut', (v) => `${HEAT_PCT_STEPS[v]}%`, (v) => {
+    ui.heatBusiestPct = HEAT_PCT_STEPS[v];
     rebuildHeat();
   });
   bindRange('sliceAz', 'azOut', (v) => `${String(v).padStart(3, '0')}&deg;`, (v) => {

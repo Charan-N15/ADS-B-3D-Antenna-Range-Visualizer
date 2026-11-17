@@ -152,6 +152,16 @@ h2 {
 
 /* A group that folds away behind its heading, for the settings that are set
    once and left. The browser's own details element, so the keyboard opens it. */
+/* A group whose heading is its own on/off switch, its settings opening under it. */
+label.grpHead {
+  padding: 0;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.grpBody { margin-top: 7px; }
+.grpBody[hidden] { display: none; }
+
 details.grp > summary {
   display: flex;
   align-items: center;

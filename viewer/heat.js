@@ -96,6 +96,17 @@ export async function loadHeatmap(base) {
  * it came from. On a receiver south of SFO this recovers the arrival's descent
  * at about 310 ft per mile, where a 3 degree approach is 318.
  */
+/**
+ * True when band b is a route's peak in its cell: no lower band busier, no
+ * upper band as busy, so a flat top counts once.
+ */
+function isPeak(col, b) {
+  const c = col[b];
+  const below = b > 0 ? col[b - 1] : 0;
+  const above = b < col.length - 1 ? col[b + 1] : 0;
+  return c > 0 && c >= below && c > above;
+}
+
 function findRoutes(heat, minHits) {
   const { meta, counts, bands, cells } = heat;
   const size = meta.size;
@@ -115,12 +126,10 @@ function findRoutes(heat, minHits) {
     }
     if (!any) continue;
     for (let b = 0; b < bands; b++) {
+      if (!isPeak(col, b)) continue;
       const c = col[b];
       const below = b > 0 ? col[b - 1] : 0;
       const above = b < bands - 1 ? col[b + 1] : 0;
-      // A peak: no lower band busier, no upper band as busy, so a flat top
-      // counts once.
-      if (!c || c < below || c <= above) continue;
       let h = c;
       let sum = c * centre[b];
       if (below) { h += below; sum += below * centre[b - 1]; }
@@ -162,6 +171,40 @@ function findRoutes(heat, minHits) {
     smoothed[r] = num / den;
   }
   return { cell, alt: smoothed, hits };
+}
+
+/** Every route's hits, busiest first, worked out once per heatmap. */
+const routeHitsCache = new WeakMap();
+
+function routeHitsDescending(heat) {
+  let hits = routeHitsCache.get(heat);
+  if (hits) return hits;
+  const { counts, bands, cells } = heat;
+  const list = [];
+  const col = new Array(bands);
+  for (let i = 0; i < cells; i++) {
+    for (let b = 0; b < bands; b++) col[b] = counts[b * cells + i];
+    for (let b = 0; b < bands; b++) {
+      if (!isPeak(col, b)) continue;
+      list.push(col[b] + (b > 0 ? col[b - 1] : 0) + (b < bands - 1 ? col[b + 1] : 0));
+    }
+  }
+  hits = Float64Array.from(list).sort().reverse();
+  routeHitsCache.set(heat, hits);
+  return hits;
+}
+
+/**
+ * The fewest hits a route can have and still be among the busiest `percent` of
+ * all routes. A threshold in hits means something different after three days
+ * than after three months, and under an approach than out in the country; a
+ * share of the routes means the same everywhere.
+ */
+export function hitsForBusiest(heat, percent) {
+  const hits = routeHitsDescending(heat);
+  if (!hits.length) return 1;
+  const keep = Math.min(hits.length, Math.max(1, Math.ceil(hits.length * percent / 100)));
+  return Math.max(1, hits[keep - 1]);
 }
 
 /** The value below which `fraction` of the entries fall. */

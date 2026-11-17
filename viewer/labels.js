@@ -31,17 +31,8 @@ const STYLE = {
   alert: '#ff6a5e',
 };
 
-/** What O steps through, each adding a field to the one before. */
-export const LABEL_PRESETS = [
-  { callsign: true, altitude: false, type: false },
-  { callsign: true, altitude: true, type: false },
-  { callsign: true, altitude: true, type: true },
-];
-
-/** The preset these fields match, or -1 for a mix of one's own. */
-export function presetIndex(fields) {
-  return LABEL_PRESETS.findIndex((p) => Object.keys(p).every((k) => p[k] === fields[k]));
-}
+/** What a label says until someone picks otherwise. */
+export const DEFAULT_LABEL_FIELDS = { callsign: true, altitude: true, type: false };
 
 /**
  * Altitude the way a scope shows it: hundreds of feet, three digits, so 35,000 ft

@@ -67,13 +67,9 @@
           <label class="sub" id="extendHorizonRow" hidden><input type="checkbox" id="extendHorizon"> Extend to top</label>
           <label><input type="checkbox" id="layerFootprint" checked> Ground footprint</label>
           <label><input type="checkbox" id="layerAircraft3d" checked> Live traffic</label>
-          <label class="sub" id="labelsRow"><input type="checkbox" id="layerLabels"> Labels</label>
           <label><input type="checkbox" id="layerGround" checked> Range rings</label>
           <label><input type="checkbox" id="layerBasemap" checked> Map</label>
           <label><input type="checkbox" id="curvature" checked> Earth curvature</label>
-          <label><input type="checkbox" id="layerHeat"> Heat footprint</label>
-          <label class="slider sub" id="heatHitsRow" hidden>Min hits <span id="heatHitsOut">1,000</span>
-            <input type="range" id="heatHits" min="0" max="11" step="1" value="9"></label>
         </div>
 
         <div class="grp" id="altLegendGroup">
@@ -92,7 +88,8 @@
         </div>
 
         <div class="grp">
-          <h2>Labels</h2>
+          <label class="grpHead"><input type="checkbox" id="layerLabels"> Labels</label>
+          <div class="grpBody" id="labelsBody" hidden>
           <div class="seg" id="labelFields" role="group" aria-label="Label fields">
             <button type="button" data-field="callsign">Callsign</button>
             <button type="button" data-field="altitude">Altitude</button>
@@ -102,6 +99,15 @@
             <i class="labelPreviewPlane"></i>
             <span class="labelPreviewBox" id="labelPreviewBox"></span>
             <span class="labelPreviewEmpty" id="labelPreviewEmpty" hidden>nothing to show</span>
+          </div>
+          </div>
+        </div>
+
+        <div class="grp">
+          <label class="grpHead"><input type="checkbox" id="layerHeat"> Heat footprint</label>
+          <div class="grpBody" id="heatBody" hidden>
+            <label class="slider">Busiest routes <span id="heatPctOut">30%</span>
+              <input type="range" id="heatPct" min="0" max="10" step="1" value="6"></label>
           </div>
         </div>
 
