@@ -32,7 +32,9 @@ const STYLE = {
 };
 
 /** What a label says until someone picks otherwise. */
-export const DEFAULT_LABEL_FIELDS = { callsign: true, altitude: true, type: false };
+export const DEFAULT_LABEL_FIELDS = {
+  callsign: true, altitude: true, type: false, range: false, signal: false,
+};
 
 /**
  * Altitude the way a scope shows it: hundreds of feet, three digits, so 35,000 ft
@@ -48,17 +50,22 @@ export function flightLevel(c) {
 }
 
 /**
- * The lines of an aircraft's box: callsign and type share the first, altitude
- * has the second. Fields switched off drop out, and so does a type the database
- * does not know, rather than leaving a placeholder.
+ * The lines of an aircraft's box: who it is on the first (callsign, type), where
+ * it is on the second (altitude, range from the receiver, signal strength).
+ * Fields switched off drop out, and so does anything the aircraft has not sent
+ * or the database does not know, rather than leaving a placeholder.
  */
 export function labelLines(c, fields) {
   const top = [];
   if (fields.callsign) top.push(c.flight || c.hex.toUpperCase());
   if (fields.type && c.type) top.push(c.type);
+  const bottom = [];
+  if (fields.altitude) bottom.push(flightLevel(c));
+  if (fields.range && Number.isFinite(c.rangeNm)) bottom.push(`${Math.round(c.rangeNm)}nm`);
+  if (fields.signal && Number.isFinite(c.rssi)) bottom.push(`${Math.round(c.rssi)}dB`);
   const lines = [];
   if (top.length) lines.push(top.join(' '));
-  if (fields.altitude) lines.push(flightLevel(c));
+  if (bottom.length) lines.push(bottom.join(' '));
   return lines;
 }
 

@@ -7,7 +7,7 @@ import {
 } from './envelope.js';
 import {
   buildGround, buildEnvelopeSurface, buildContourRings, buildHorizonSurface,
-  buildCellHighlight, AircraftLayer,
+  buildCellHighlight, AircraftLayer, TrailLayer,
 } from './layers.js';
 import { loadBasemap, buildBasemapDisc } from './basemap.js';
 import { altitudeCss, LEGEND_ALTITUDES } from './altitude.js';
@@ -48,7 +48,7 @@ const DEFAULT_UI = {
   layers: {
     envelope: true, contours: true, horizon: false, ground: true,
     basemap: true, footprint: true, aircraft3d: true,
-    heat: false, labels: false,
+    heat: false, labels: false, trails: true,
   },
   labelFields: { ...DEFAULT_LABEL_FIELDS },
   heatBusiestPct: 30,
@@ -114,6 +114,9 @@ controls.maxPolarAngle = Math.PI * 0.98;
 const aircraftLayer = new AircraftLayer();
 aircraftLayer.planeScale = ui.planeScale;
 scene.add(aircraftLayer.group);
+
+const trailLayer = new TrailLayer();
+scene.add(trailLayer.group);
 
 const labelLayer = new LabelLayer(el('labels'));
 
@@ -214,8 +217,17 @@ function rebuildScene() {
   applyLayerVisibility();
   // Re-filtered here as well as on each poll, because changing the altitude
   // window has to take effect without waiting for the next second of data.
-  aircraftLayer.setContacts(visibleContacts());
+  updateTraffic();
+}
+
+/** Puts the current traffic, and where it has been, into the scene. */
+function updateTraffic() {
+  const shown = visibleContacts();
+  const opts = viewOpts();
+  aircraftLayer.setContacts(shown);
   aircraftLayer.update(opts);
+  // Each trail ends at the aircraft itself, not at the last point kept.
+  trailLayer.update(shown.map((c) => [...(trails.get(c.hex) || []), c]), opts);
 }
 
 function applyLayerVisibility() {
@@ -228,6 +240,7 @@ function applyLayerVisibility() {
   if (basemapMesh) basemapMesh.visible = ui.layers.basemap;
   if (heatVolume) heatVolume.visible = ui.layers.heat;
   aircraftLayer.setVisibility(ui.layers.aircraft3d);
+  trailLayer.setVisibility(ui.layers.aircraft3d && ui.layers.trails);
 }
 
 function rebuildHeat() {
@@ -378,6 +391,53 @@ function turnRate(hex, now, track) {
   return den > 0 ? num / den : 0;
 }
 
+/**
+ * A trail keeps a new point once the aircraft has moved this far, climbed or
+ * descended this much, or this many seconds have passed. An airliner lays a
+ * point every couple of seconds, which is smooth at any zoom, while a parked or
+ * loitering one does not pile up thousands of points in one place.
+ */
+const TRAIL_STEP_NM = 0.25;
+const TRAIL_STEP_FT = 200;
+const TRAIL_STEP_S = 30;
+
+/** How far back a trail reaches, in seconds. Infinity keeps all of it. */
+const TRAIL_MAX_AGE_S = Infinity;
+
+const trails = new Map();   // hex -> [{ t, az, rangeNm, altFt }], oldest first
+
+function polarXY(p) {
+  const a = p.az * Math.PI / 180;
+  return [p.rangeNm * Math.sin(a), p.rangeNm * Math.cos(a)];
+}
+
+/**
+ * Adds this poll's positions to the trails. An aircraft that has dropped off
+ * the feed takes its whole trail with it.
+ */
+function recordTrails(now, list) {
+  const heard = new Set();
+  for (const c of list) {
+    heard.add(c.hex);
+    let trail = trails.get(c.hex);
+    if (!trail) trails.set(c.hex, trail = []);
+    const last = trail[trail.length - 1];
+    let keep = !last;
+    if (last) {
+      const [x0, y0] = polarXY(last);
+      const [x1, y1] = polarXY(c);
+      keep = Math.hypot(x1 - x0, y1 - y0) >= TRAIL_STEP_NM
+        || Math.abs(c.altFt - last.altFt) >= TRAIL_STEP_FT
+        || now - last.t >= TRAIL_STEP_S;
+    }
+    if (keep) trail.push({ t: now, az: c.az, rangeNm: c.rangeNm, altFt: c.altFt });
+    while (trail.length && trail[0].t < now - TRAIL_MAX_AGE_S) trail.shift();
+  }
+  for (const hex of trails.keys()) {
+    if (!heard.has(hex)) trails.delete(hex);
+  }
+}
+
 async function refreshAircraft() {
   try {
     const resp = await fetch(AIRCRAFT_URL, { cache: 'no-store' });
@@ -408,6 +468,7 @@ async function refreshAircraft() {
         type: info ? info.type : null,
         squawk: ac.squawk || null,
         labelAltFt: typeof ac.alt_baro === 'number' ? ac.alt_baro : alt,
+        rssi: typeof ac.rssi === 'number' ? ac.rssi : null,
         onGround: ac.alt_baro === 'ground',
       });
     }
@@ -416,8 +477,10 @@ async function refreshAircraft() {
     for (const [hex, history] of trackHistory) {
       if (history[history.length - 1].t < snapshot.now - 60) trackHistory.delete(hex);
     }
-    aircraftLayer.setContacts(visibleContacts());
-    aircraftLayer.update(viewOpts());
+    recordTrails(snapshot.now, out);
+    updateTraffic();
+    // One dropped poll should not leave an error up once traffic is flowing again.
+    if (el('status').textContent.startsWith('traffic:')) setStatus(null);
   } catch (err) {
     setStatus(`traffic: ${err.message} from ${AIRCRAFT_URL}`, true);
   }
@@ -508,7 +571,24 @@ function showPick(az, band) {
     rows.push(['raw range', 'no contact in this band']);
   }
   defList(el('pick'), rows);
+  // The cell's own altitude colour, on its panel and on the Info button.
+  const colour = altitudeCss(lo);
+  group.style.setProperty('--pick', colour);
+  el('infoButton').style.setProperty('--pick', colour);
   group.hidden = false;
+}
+
+/**
+ * While a selected cell's details are out of sight, the Info button takes the
+ * cell's colour, with a short pulse when a new cell is picked, so there is
+ * something to find there without a badge sitting on the rail.
+ */
+function updatePickNotice(fresh = false) {
+  const button = el('infoButton');
+  const waiting = Boolean(selectedCell) && (ui.section !== 'info' || ui.panelCollapsed);
+  if (fresh) button.classList.remove('waiting');
+  if (waiting && fresh) void button.offsetWidth;   // restarts the pulse
+  button.classList.toggle('waiting', waiting);
 }
 
 // ----------------------------------------------------------------------- views
@@ -536,6 +616,7 @@ function showSection(name) {
   for (const button of document.querySelectorAll('.rail-btn.sect')) {
     button.classList.toggle('on', button.dataset.sect === name);
   }
+  updatePickNotice();
 }
 
 function setPanelCollapsed(collapsed) {
@@ -544,6 +625,7 @@ function setPanelCollapsed(collapsed) {
   const toggle = el('panelToggle');
   toggle.innerHTML = collapsed ? '&#8250;' : '&#8249;';
   toggle.title = collapsed ? 'Show the panel' : 'Collapse the panel';
+  updatePickNotice();
   // The stage is a flex sibling, so it has just changed width.
   resize();
 }
@@ -622,6 +704,7 @@ function animate() {
 /** A made-up aircraft, so the preview shows every field even with no traffic. */
 const LABEL_SAMPLE = {
   hex: 'a1b2c3', flight: 'UAL1234', type: 'B738', labelAltFt: 35000, vs: -1200,
+  rangeNm: 62, rssi: -18.4,
 };
 
 /** Puts the chosen label fields onto the strip's buttons and the preview box. */
@@ -702,6 +785,7 @@ function applyUiToControls() {
     layerFootprint: ui.layers.footprint,
     layerHeat: ui.layers.heat,
     layerLabels: ui.layers.labels,
+    layerTrails: ui.layers.trails,
     // Before extendHorizon, which switches it off: restoring them the other way
     // round would let curvature undo the extension it was meant to accompany.
     curvature: ui.curvature,
@@ -787,6 +871,7 @@ function wireUi() {
     applyLayerVisibility();
   });
   bindCheckbox('layerAircraft3d', (v) => { ui.layers.aircraft3d = v; applyLayerVisibility(); });
+  bindCheckbox('layerTrails', (v) => { ui.layers.trails = v; applyLayerVisibility(); });
   // The label fields only mean anything while labels are showing, so they open
   // out under the switch, the same as the heat's threshold below.
   bindCheckbox('layerLabels', (v) => {
@@ -888,7 +973,7 @@ function wireUi() {
   bindRange('hits', 'hitsOut', (v) => String(v), (v) => {
     ui.minHits = v; onDataOptionChange();
   });
-  bindRange('heatPct', 'heatPctOut', (v) => `${HEAT_PCT_STEPS[v]}%`, (v) => {
+  bindRange('heatPct', 'heatPctOut', (v) => (HEAT_PCT_STEPS[v] === 100 ? 'all' : `top ${HEAT_PCT_STEPS[v]}%`), (v) => {
     ui.heatBusiestPct = HEAT_PCT_STEPS[v];
     rebuildHeat();
   });
@@ -926,6 +1011,7 @@ function wireUi() {
       el('pickGroup').hidden = true;
       selectedCell = null;
       updateCellHighlight();
+      updatePickNotice();
       return;
     }
     const { vertexAz, vertexBand } = mesh.userData;
@@ -933,6 +1019,7 @@ function wireUi() {
     selectedCell = { az: vertexAz[vertex], band: vertexBand[vertex] };
     showPick(selectedCell.az, selectedCell.band);
     updateCellHighlight();
+    updatePickNotice(true);
   });
 
   el('saveSettings').addEventListener('click', () => {

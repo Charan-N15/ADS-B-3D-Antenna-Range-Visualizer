@@ -558,4 +558,77 @@ export class AircraftLayer {
   }
 }
 
+/** Trails are drawn a little darker than the aircraft, so the aircraft stays on top. */
+const TRAIL_DIM = 0.7;
+
+/**
+ * Where each aircraft has been, as one line per aircraft through every position
+ * heard since it appeared. All of them share one set of line segments, so a sky
+ * full of trails is still a single draw. Positions are kept as bearing, range and
+ * altitude and projected here, so a change of exaggeration or curvature bends
+ * the trails along with everything else.
+ */
+export class TrailLayer {
+  constructor() {
+    this.capacity = 0;
+    this.geometry = new THREE.BufferGeometry();
+    this.lines = new THREE.LineSegments(this.geometry,
+      new THREE.LineBasicMaterial({ vertexColors: true }));
+    this.lines.name = 'trails';
+    // The geometry changes every second; working out its bounds for culling
+    // would cost more than drawing it.
+    this.lines.frustumCulled = false;
+    this.group = this.lines;
+  }
+
+  setVisibility(show) {
+    this.lines.visible = show;
+  }
+
+  grow(segments) {
+    if (segments <= this.capacity) return;
+    this.capacity = Math.max(1024, Math.ceil(segments * 1.5));
+    this.positions = new Float32Array(this.capacity * 6);
+    this.colors = new Float32Array(this.capacity * 6);
+    this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+    this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+  }
+
+  /** trails: one array of {az, rangeNm, altFt} per aircraft, oldest first. */
+  update(trails, opts) {
+    let segments = 0;
+    for (const points of trails) segments += Math.max(0, points.length - 1);
+    this.grow(segments);
+    const byAlt = Boolean(opts.colorByAlt);
+    const flat = FLAT_COLOR.clone().multiplyScalar(TRAIL_DIM);
+    const tint = new THREE.Color();
+
+    let v = 0;
+    const put = (p) => {
+      const [x, y, z] = project(p.az, p.rangeNm, p.altFt, opts);
+      this.positions[v * 3] = x;
+      this.positions[v * 3 + 1] = y;
+      this.positions[v * 3 + 2] = z;
+      const c = byAlt
+        ? tint.copy(altitudeThreeColor(Math.round(p.altFt / 100) * 100)).multiplyScalar(TRAIL_DIM)
+        : flat;
+      this.colors[v * 3] = c.r;
+      this.colors[v * 3 + 1] = c.g;
+      this.colors[v * 3 + 2] = c.b;
+      v++;
+    };
+    for (const points of trails) {
+      for (let i = 1; i < points.length; i++) {
+        put(points[i - 1]);
+        put(points[i]);
+      }
+    }
+    this.geometry.setDrawRange(0, v);
+    if (this.capacity) {
+      this.geometry.attributes.position.needsUpdate = true;
+      this.geometry.attributes.color.needsUpdate = true;
+    }
+  }
+}
+
 export { horizonRangeNm, curvatureDropFt, FT_PER_NM };

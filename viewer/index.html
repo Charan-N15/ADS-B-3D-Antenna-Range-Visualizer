@@ -42,7 +42,7 @@
       <svg viewBox="0 0 18 18"><path d="M2.5 5h13M2.5 9h13M2.5 13h13"/><circle cx="6" cy="5" r="1.8"/><circle cx="12" cy="9" r="1.8"/><circle cx="7.5" cy="13" r="1.8"/></svg>
       <span>View</span>
     </button>
-    <button class="rail-btn sect" data-sect="info" title="Envelope info">
+    <button class="rail-btn sect" id="infoButton" data-sect="info" title="Envelope info">
       <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><path d="M9 8.2v4.6M9 5.4v.6"/></svg>
       <span>Info</span>
     </button>
@@ -67,6 +67,7 @@
           <label class="sub" id="extendHorizonRow" hidden><input type="checkbox" id="extendHorizon"> Extend to top</label>
           <label><input type="checkbox" id="layerFootprint" checked> Ground footprint</label>
           <label><input type="checkbox" id="layerAircraft3d" checked> Live traffic</label>
+          <label><input type="checkbox" id="layerTrails" checked> Trails</label>
           <label><input type="checkbox" id="layerGround" checked> Range rings</label>
           <label><input type="checkbox" id="layerBasemap" checked> Map</label>
           <label><input type="checkbox" id="curvature" checked> Earth curvature</label>
@@ -90,10 +91,16 @@
         <div class="grp">
           <label class="grpHead"><input type="checkbox" id="layerLabels"> Labels</label>
           <div class="grpBody" id="labelsBody" hidden>
-          <div class="seg" id="labelFields" role="group" aria-label="Label fields">
-            <button type="button" data-field="callsign">Callsign</button>
-            <button type="button" data-field="altitude">Altitude</button>
-            <button type="button" data-field="type">Type</button>
+          <div class="segs" id="labelFields" role="group" aria-label="Label fields">
+            <div class="seg">
+              <button type="button" data-field="callsign">Callsign</button>
+              <button type="button" data-field="altitude">Altitude</button>
+              <button type="button" data-field="type">Type</button>
+            </div>
+            <div class="seg">
+              <button type="button" data-field="range">Range</button>
+              <button type="button" data-field="signal">Signal</button>
+            </div>
           </div>
           <div class="labelPreview">
             <i class="labelPreviewPlane"></i>
@@ -106,7 +113,7 @@
         <div class="grp">
           <label class="grpHead"><input type="checkbox" id="layerHeat"> Heat footprint</label>
           <div class="grpBody" id="heatBody" hidden>
-            <label class="slider">Busiest routes <span id="heatPctOut">30%</span>
+            <label class="slider">Routes shown <span id="heatPctOut">top 30%</span>
               <input type="range" id="heatPct" min="0" max="10" step="1" value="6"></label>
           </div>
         </div>

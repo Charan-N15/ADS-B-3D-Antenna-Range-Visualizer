@@ -106,6 +106,17 @@ html, body {
 .rail-btn:hover { color: var(--fg); }
 .rail-btn.on { color: var(--accent); background: var(--panel); border-color: var(--line); }
 
+/* A selected cell waiting in Info: the button takes the cell's altitude colour,
+   pulsing twice when a new one is picked. */
+.rail-btn.waiting { color: var(--pick); }
+.rail-btn.waiting svg { animation: pickPulse 0.9s ease-out 2; }
+
+@keyframes pickPulse {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.22); }
+  100% { transform: scale(1); }
+}
+
 /* ----------------------------------------------------------------- panel */
 
 #panel {
@@ -281,6 +292,27 @@ button {
 }
 
 button:hover { border-color: var(--accent); color: var(--accent); }
+
+/* The selected cell's panel, edged and faintly filled in the cell's colour. */
+#pickGroup {
+  border-color: var(--pick, var(--line));
+  background: color-mix(in srgb, var(--pick, transparent) 12%, transparent);
+}
+
+#pickGroup h2::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 7px;
+  border-radius: 2px;
+  background: var(--pick, var(--faint));
+}
+
+/* Rows of strips stacked into one control. */
+.segs { margin: 2px 0 6px; }
+.segs .seg { margin: 0; }
+.segs .seg + .seg { margin-top: 4px; }
 
 /* A row of buttons that each switch one thing on or off, joined into a strip. */
 .seg {
