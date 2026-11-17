@@ -7,7 +7,7 @@ import {
 } from './envelope.js';
 import {
   buildGround, buildEnvelopeSurface, buildContourRings, buildHorizonSurface,
-  AircraftLayer,
+  buildCellHighlight, AircraftLayer,
 } from './layers.js';
 import { loadBasemap, buildBasemapDisc } from './basemap.js';
 import { altitudeCss, LEGEND_ALTITUDES } from './altitude.js';
@@ -126,6 +126,8 @@ let heat = null;         // the collector's heatmap, refetched every few minutes
 let heatVolumeTex = null;   // the routes as tubes in a 3D texture
 let heatVolumeKey = null;
 let heatVolume = null;   // the counts in the air, at the heights flown
+let selectedCell = null; // { az, band } clicked on the envelope, or null
+let cellHighlight = null;
 
 function viewOpts() {
   return {
@@ -203,6 +205,7 @@ function rebuildScene() {
     scene.add(basemapMesh);
   }
   rebuildHeat();
+  updateCellHighlight();
   applyLayerVisibility();
   // Re-filtered here as well as on each poll, because changing the altitude
   // window has to take effect without waiting for the next second of data.
@@ -213,6 +216,7 @@ function rebuildScene() {
 function applyLayerVisibility() {
   if (groundGroup) groundGroup.visible = ui.layers.ground;
   if (envelopeGroup) envelopeGroup.visible = ui.layers.envelope;
+  if (cellHighlight) cellHighlight.visible = ui.layers.envelope;
   if (contourGroup) contourGroup.visible = ui.layers.contours;
   if (horizonGroup) horizonGroup.visible = ui.layers.horizon;
   if (footprintGroup) footprintGroup.visible = ui.layers.footprint;
@@ -239,6 +243,21 @@ function rebuildHeat() {
     heatVolume.visible = ui.layers.heat;
     scene.add(heatVolume);
   }
+}
+
+/**
+ * Rebuilt from the surface each time, rather than kept, because anything that
+ * moves the surface (exaggeration, curvature, a new envelope) moves the cell.
+ */
+function updateCellHighlight() {
+  disposeGroup(cellHighlight);
+  cellHighlight = null;
+  if (!selectedCell || !envelopeGroup) return;
+  cellHighlight = buildCellHighlight(envelopeGroup.userData.mesh,
+    selectedCell.az, selectedCell.band);
+  if (!cellHighlight) return;
+  cellHighlight.visible = ui.layers.envelope;
+  scene.add(cellHighlight);
 }
 
 async function initBasemap() {
@@ -847,10 +866,17 @@ function wireUi() {
     raycaster.setFromCamera(ndc, camera);
     const mesh = envelopeGroup.userData.mesh;
     const hits = raycaster.intersectObject(mesh, false);
-    if (!hits.length) { el('pickGroup').hidden = true; return; }
+    if (!hits.length) {
+      el('pickGroup').hidden = true;
+      selectedCell = null;
+      updateCellHighlight();
+      return;
+    }
     const { vertexAz, vertexBand } = mesh.userData;
     const vertex = hits[0].face.a;
-    showPick(vertexAz[vertex], vertexBand[vertex]);
+    selectedCell = { az: vertexAz[vertex], band: vertexBand[vertex] };
+    showPick(selectedCell.az, selectedCell.band);
+    updateCellHighlight();
   });
 
   el('saveSettings').addEventListener('click', () => {

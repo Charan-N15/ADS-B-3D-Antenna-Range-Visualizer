@@ -286,6 +286,81 @@ export function buildHorizonSurface(maxRangeNm, opts, extendToAltFt) {
   return group;
 }
 
+/** On-screen selection: the cell's fill is its altitude colour this far toward white. */
+const HIGHLIGHT_LIGHTEN = 0.45;
+
+/** Size of the ring round a selected cell, in pixels, however far out the view is. */
+const SELECT_RING_PX = 22;
+
+/** A white ring edged in black, so it reads over the surface and the dark sky alike. */
+let selectRing = null;
+function selectRingTexture() {
+  if (selectRing) return selectRing;
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  // Widest first, so the black band is left showing on both sides of the white.
+  for (const [width, style] of [[14, '#000'], [6, '#fff']]) {
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, 24, 0, Math.PI * 2);
+    ctx.lineWidth = width;
+    ctx.strokeStyle = style;
+    ctx.stroke();
+  }
+  selectRing = new THREE.CanvasTexture(canvas);
+  return selectRing;
+}
+
+/**
+ * The selected cell, picked out on the envelope: its four corners lifted
+ * straight from the surface's own vertices, so it sits exactly on the cell,
+ * filled bright and edged in white. A cell is one degree by one band, often a
+ * sliver at normal zoom, so a ring of fixed size marks where it is from any
+ * distance. Drawn over everything, so a cell on the far side of the bowl still
+ * shows through the near wall. Null when the cell has no surface to sit on.
+ */
+export function buildCellHighlight(surface, az, band) {
+  const pos = surface.geometry.getAttribute('position');
+  const { model } = surface.userData;
+  const next = (az + 1) % 360;
+  const corners = [
+    band * 360 + az, band * 360 + next, (band + 1) * 360 + next, (band + 1) * 360 + az,
+  ];
+  if (corners[2] >= pos.count) return null;
+  const points = corners.map((i) => new THREE.Vector3().fromBufferAttribute(pos, i));
+  // A corner pulled in to the receiver has no coverage, and so no surface.
+  if (points.some((p) => Math.hypot(p.x, p.y) < MIN_RADIUS_NM)) return null;
+
+  const fillGeom = new THREE.BufferGeometry().setFromPoints(points);
+  fillGeom.setIndex([0, 1, 2, 0, 2, 3]);
+  const tint = altitudeThreeColor(model.edges[band]).clone()
+    .lerp(new THREE.Color(0xffffff), HIGHLIGHT_LIGHTEN);
+  const fill = new THREE.Mesh(fillGeom, new THREE.MeshBasicMaterial({
+    color: tint, transparent: true, opacity: 0.9, side: THREE.DoubleSide,
+    depthTest: false, depthWrite: false,
+  }));
+  const edge = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(points),
+    new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false }));
+  const centre = points.reduce((sum, p) => sum.add(p), new THREE.Vector3()).divideScalar(4);
+  const ring = new THREE.Points(new THREE.BufferGeometry().setFromPoints([centre]),
+    new THREE.PointsMaterial({
+      map: selectRingTexture(), size: SELECT_RING_PX, sizeAttenuation: false,
+      transparent: true, depthTest: false, depthWrite: false,
+    }));
+  ring.frustumCulled = false;
+  // Last of all, after the aircraft and the heat.
+  fill.renderOrder = 20;
+  edge.renderOrder = 21;
+  ring.renderOrder = 22;
+
+  const group = new THREE.Group();
+  group.name = 'cellHighlight';
+  group.add(fill, edge, ring);
+  return group;
+}
+
 const FLAT_COLOR = new THREE.Color(COLORS.aircraft);
 const _pos = new THREE.Vector3();
 const _euler = new THREE.Euler();
