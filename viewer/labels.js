@@ -3,8 +3,9 @@
 // Drawn flat on a 2D canvas laid over the 3D scene rather than inside it, so the
 // text stays sharp and the same size on screen however far the camera is pulled
 // back, the same way the aircraft themselves are kept a fixed size. Each frame
-// every aircraft's position is projected to the screen and its box is placed at
-// one of its four corners, whichever collides least with the boxes already down.
+// every aircraft's position is projected to the screen and its box hung off it
+// up and to the right on a short leader line. Always that corner: a box that
+// hopped to whichever side was free would hop every time the view turned.
 
 import * as THREE from 'three';
 
@@ -13,8 +14,11 @@ const LINE_PX = 14;
 const PAD_X = 5;
 const PAD_Y = 3;
 
-/** Clear space between the aircraft's centre and its box, beyond half its size. */
-const GAP_PX = 2;
+/** Where the leader leaves the aircraft, as a share of its half-size. */
+const LEADER_START = 0.6;
+
+/** How far the leader runs, up and to the right, before it meets the box. */
+const LEADER_PX = 10;
 
 /** Climbing or descending faster than this, feet a minute, earns an arrow. Matches the pitch. */
 const LEVEL_FPM = 150;
@@ -24,17 +28,12 @@ const EMERGENCY_SQUAWKS = new Set(['7500', '7600', '7700']);
 
 const STYLE = {
   font: `${FONT_PX}px ui-monospace, "DejaVu Sans Mono", Consolas, monospace`,
-  fill: 'rgba(15, 16, 18, 0.8)',
+  fill: 'rgba(15, 16, 18, 0.6)',
   edge: '#3c414a',
+  leader: '#767c85',
   text: '#f2f3f5',
   alert: '#ff6a5e',
 };
-
-/** Up-right, up-left, down-right, down-left: the order a box tries the corners. */
-const CORNERS = [[1, -1], [-1, -1], [1, 1], [-1, 1]];
-
-/** Other aircraft count against a placement, but less than covering another label. */
-const PLANE_WEIGHT = 0.5;
 
 /** What O steps through, each adding a field to the one before. */
 export const LABEL_PRESETS = [
@@ -76,12 +75,6 @@ export function labelLines(c, fields) {
   return lines;
 }
 
-function overlap(a, b) {
-  const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
-  const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
-  return w > 0 && h > 0 ? w * h : 0;
-}
-
 const _v = new THREE.Vector3();
 
 export class LabelLayer {
@@ -91,9 +84,6 @@ export class LabelLayer {
     this.width = 0;
     this.height = 0;
     this.dpr = 1;
-    // Corner each aircraft's box sat at last frame, so labels only move when
-    // they have to rather than flickering between equally good spots.
-    this.corners = new Map();
     this.textWidths = new Map();
     this.dirty = false;
   }
@@ -131,19 +121,15 @@ export class LabelLayer {
    */
   draw(layer, camera, fields, planePx) {
     this.clear();
-    if (!layer || !layer.contacts.length) {
-      this.corners.clear();
-      return;
-    }
+    if (!layer || !layer.contacts.length) return;
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.font = STYLE.font;
     ctx.textBaseline = 'top';
     this.dirty = true;
 
-    const half = planePx / 2;
+    const start = planePx / 2 * LEADER_START;
     const items = [];
-    const planes = [];
     const { contacts, headPositions } = layer;
     for (let i = 0; i < contacts.length; i++) {
       const c = contacts[i];
@@ -155,7 +141,6 @@ export class LabelLayer {
       const x = (_v.x + 1) / 2 * this.width;
       const y = (1 - _v.y) / 2 * this.height;
       if (x < -50 || x > this.width + 50 || y < -50 || y > this.height + 50) continue;
-      planes.push({ x: x - half, y: y - half, w: planePx, h: planePx, hex: c.hex });
 
       const lines = labelLines(c, fields);
       if (!lines.length) continue;
@@ -168,61 +153,29 @@ export class LabelLayer {
       });
     }
 
-    // Emergencies choose first, then the nearest aircraft: the ones furthest
-    // away are the ones that give way.
-    items.sort((a, b) => (b.alert - a.alert) || (a.dist - b.dist));
+    // Furthest first, so nearer aircraft draw over them, and emergencies over all.
+    items.sort((a, b) => (a.alert - b.alert) || (b.dist - a.dist));
 
-    const gap = half + GAP_PX;
-    const placed = [];
-    const seen = new Set();
-    for (const item of items) {
-      seen.add(item.hex);
-      const last = this.corners.get(item.hex);
-      const order = last === undefined ? [0, 1, 2, 3] : [last, 0, 1, 2, 3].filter((k, i, a) => a.indexOf(k) === i);
-      let best = null;
-      let bestCost = Infinity;
-      for (const k of order) {
-        const [dx, dy] = CORNERS[k];
-        const rect = {
-          x: Math.round(dx > 0 ? item.x + gap : item.x - gap - item.w),
-          y: Math.round(dy > 0 ? item.y + gap : item.y - gap - item.h),
-          w: item.w,
-          h: item.h,
-        };
-        let cost = 0;
-        for (const other of placed) cost += overlap(rect, other);
-        for (const plane of planes) {
-          if (plane.hex !== item.hex) cost += overlap(rect, plane) * PLANE_WEIGHT;
-        }
-        // Whatever hangs off the edge of the view is as bad as being covered.
-        const inside = overlap(rect, { x: 0, y: 0, w: this.width, h: this.height });
-        cost += rect.w * rect.h - inside;
-        if (cost < bestCost) {
-          best = { rect, k };
-          bestCost = cost;
-          if (cost === 0) break;
-        }
-      }
-      this.corners.set(item.hex, best.k);
-      item.rect = best.rect;
-      placed.push(best.rect);
-    }
-    for (const hex of this.corners.keys()) {
-      if (!seen.has(hex)) this.corners.delete(hex);
-    }
-
-    // Lowest priority first, so where boxes do have to overlap the one that
-    // chose first is drawn on top.
     ctx.lineWidth = 1;
-    for (let i = items.length - 1; i >= 0; i--) {
-      const { rect, lines, alert } = items[i];
+    for (const { x, y, w, h, lines, alert } of items) {
+      const x0 = x + start;
+      const y0 = y - start;
+      const bx = Math.round(x0 + LEADER_PX);
+      const by = Math.round(y0 - LEADER_PX) - h;
+
+      ctx.strokeStyle = alert ? STYLE.alert : STYLE.leader;
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(bx + 0.5, by + h - 0.5);
+      ctx.stroke();
+
       ctx.fillStyle = STYLE.fill;
-      ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.fillRect(bx, by, w, h);
       ctx.strokeStyle = alert ? STYLE.alert : STYLE.edge;
-      ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+      ctx.strokeRect(bx + 0.5, by + 0.5, w - 1, h - 1);
       ctx.fillStyle = alert ? STYLE.alert : STYLE.text;
       lines.forEach((line, n) => {
-        ctx.fillText(line, rect.x + PAD_X, rect.y + PAD_Y + n * LINE_PX + 1);
+        ctx.fillText(line, bx + PAD_X, by + PAD_Y + n * LINE_PX + 1);
       });
     }
   }
