@@ -3,9 +3,11 @@
 
 Serves viewer/ at / and stands in for the paths lighttpd provides on the Pi:
 
-  /state/envelope.json   local data/envelope.json, or proxied from the receiver
-  /tar1090/data/<file>   proxied, which avoids the CORS problem the viewer would
-                         otherwise hit talking to a different origin
+  /state/<file>          the collector's envelope and heatmap: from data/ when a
+                         local copy is there, otherwise proxied from the receiver
+  /tar1090/<path>        proxied: live traffic, and the aircraft database the
+                         viewer reads types from. Same origin as the viewer, which
+                         avoids the CORS problem of talking to the Pi directly
 
 Usage:
   python tools/devserver.py --receiver http://your-pi/tar1090
@@ -26,7 +28,14 @@ import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VIEWER_DIR = os.path.join(ROOT, "viewer")
-STATE_FILE = os.path.join(ROOT, "data", "envelope.json")
+STATE_DIR = os.path.join(ROOT, "data")
+
+# What the collector writes beside its envelope, and how each is served.
+STATE_FILES = {
+    "envelope.json": "application/json",
+    "heatmap.json": "application/json",
+    "heatmap.bin": "application/octet-stream",
+}
 
 WATCH_SUFFIXES = (".html", ".css", ".js")
 # The vendored library never changes and the tiles are hundreds of files;
@@ -69,7 +78,7 @@ def newest_mtime():
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     receiver = "http://localhost/tar1090"
-    envelope_url = None
+    state_url = None    # the receiver's /range3d/state/, for files not in data/
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=VIEWER_DIR, **kwargs)
@@ -95,15 +104,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.send_body(RELOAD_CLIENT, "text/javascript")
         if path in ("/", "/index.html"):
             return self.serve_index()
-        if path == "/state/envelope.json":
-            return self.serve_state()
-        if path.startswith("/tar1090/data/"):
-            return self.proxy(path[len("/tar1090/data/"):])
+        if path.startswith("/state/") and path[len("/state/"):] in STATE_FILES:
+            return self.serve_state(path[len("/state/"):])
+        if path.startswith("/tar1090/"):
+            return self.proxy(path[len("/tar1090/"):])
         return super().do_GET()
 
-    def send_body(self, body, ctype, status=200):
+    def send_body(self, body, ctype, status=200, encoding=None):
         self.send_response(status)
         self.send_header("Content-Type", ctype)
+        if encoding:
+            self.send_header("Content-Encoding", encoding)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -124,37 +135,42 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         page = page.replace(b"</body>", tag, 1)
         self.send_body(page, "text/html; charset=utf-8")
 
-    def serve_state(self):
+    def serve_state(self, name):
         """Local snapshot if there is one, otherwise straight from the receiver."""
+        ctype = STATE_FILES[name]
         try:
-            with open(STATE_FILE, "rb") as fh:
-                return self.send_body(fh.read(), "application/json")
+            with open(os.path.join(STATE_DIR, name), "rb") as fh:
+                return self.send_body(fh.read(), ctype)
         except OSError:
             pass
-        if not self.envelope_url:
-            self.send_error(404, "no local envelope and no --envelope url")
+        if not self.state_url:
+            self.send_error(404, "no local %s and no receiver to fetch it from" % name)
             return
         try:
-            with urllib.request.urlopen(self.envelope_url, timeout=20) as resp:
+            url = urllib.parse.urljoin(self.state_url, name)
+            with urllib.request.urlopen(url, timeout=20) as resp:
                 body = resp.read()
         except (urllib.error.URLError, OSError) as exc:
-            self.send_error(502, "envelope upstream: %s" % exc)
+            self.send_error(502, "%s upstream: %s" % (name, exc))
             return
-        self.send_body(body, "application/json")
+        self.send_body(body, ctype)
 
-    def proxy(self, name):
-        if "/" in name or ".." in name:
+    def proxy(self, rest):
+        # tar1090 serves its database pre-gzipped and says so in a header; the
+        # body is passed on still compressed, so the header has to go with it.
+        if ".." in rest or "\\" in rest:
             self.send_error(400, "bad path")
             return
-        url = "%s/data/%s" % (self.receiver.rstrip("/"), name)
+        url = "%s/%s" % (self.receiver.rstrip("/"), rest)
         try:
             with urllib.request.urlopen(url, timeout=10) as resp:
                 body = resp.read()
-                ctype = resp.headers.get("Content-Type", "application/json")
+                ctype = resp.headers.get("Content-Type", "application/octet-stream")
+                encoding = resp.headers.get("Content-Encoding")
         except (urllib.error.URLError, OSError) as exc:
             self.send_error(502, "upstream: %s" % exc)
             return
-        self.send_body(body, ctype)
+        self.send_body(body, ctype, encoding=encoding)
 
 
 def main():
@@ -169,14 +185,18 @@ def main():
     args = parser.parse_args()
 
     Handler.receiver = args.receiver
-    Handler.envelope_url = args.envelope or urllib.parse.urljoin(
+    envelope_url = args.envelope or urllib.parse.urljoin(
         args.receiver.rstrip("/") + "/", "../range3d/state/envelope.json")
+    # Everything the collector writes sits beside the envelope.
+    Handler.state_url = urllib.parse.urljoin(envelope_url, ".")
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print("viewer    http://127.0.0.1:%d/" % args.port)
     print("receiver  %s" % args.receiver)
-    print("envelope  %s" % (STATE_FILE if os.path.exists(STATE_FILE)
-                            else Handler.envelope_url))
+    for name in ("envelope.json", "heatmap.bin"):
+        local = os.path.join(STATE_DIR, name)
+        print("%-9s %s" % (name.split(".")[0], local if os.path.exists(local)
+                                               else Handler.state_url + name))
     print("watching  %s for changes" % VIEWER_DIR)
     print("edit and save anything under viewer/ and the page will reload",
           flush=True)

@@ -16,16 +16,24 @@ import {
 } from './settings.js';
 import { SliceView } from './slice.js';
 import { TAR1090_PATH } from './config.js';
+import { initTypes, typeOf, shapeFor } from './types.js';
+import {
+  loadHeatmap, buildTubeTexture, buildHeatVolume, summarizeHeat,
+} from './heat.js';
 
 const params = new URLSearchParams(location.search);
 const ENVELOPE_URL = params.get('envelope') || 'state/envelope.json';
+const HEAT_URL = params.get('heatmap') || 'state/heatmap';
 // Where the "return to 2D" link goes, and where live traffic is read from. Both
 // hang off one path so they cannot drift apart: a receiver that serves tar1090
 // from somewhere else breaks both or neither. config.js holds the installed
 // location; the trailing slash is forced so ?tar1090=/adsbx works too.
 const TAR1090_URL = (params.get('tar1090') || TAR1090_PATH).replace(/\/?$/, '/');
 const AIRCRAFT_URL = params.get('aircraft') || `${TAR1090_URL}data/aircraft.json`;
+initTypes(TAR1090_URL);
 const ENVELOPE_REFRESH_MS = 60000;
+// The collector rewrites the heatmap every five minutes; no point asking sooner.
+const HEAT_REFRESH_MS = 300000;
 const AIRCRAFT_REFRESH_MS = 1000;
 const CONTOUR_ALTITUDES = [2000, 5000, 10000, 20000, 30000, 40000];
 
@@ -35,9 +43,12 @@ const DEFAULT_UI = {
   view: 'orbit',
   layers: {
     envelope: true, contours: true, horizon: false, ground: true,
-    basemap: true, footprint: true, aircraft3d: true, aircraft2d: false,
+    basemap: true, footprint: true, aircraft3d: true,
+    heat: false,
   },
   mapOpacity: 1,
+  heatOpacity: 0.85,
+  heatMinHits: 500,
   extendHorizon: false,
   altMinFt: 0,
   altMaxFt: 50000,
@@ -46,6 +57,7 @@ const DEFAULT_UI = {
   colorByAlt: true,
   smoothDeg: 7,
   minHits: 1,
+  planeScale: 1,
   closure: true,
   rxAltFt: 100,
   sliceAz: 0,
@@ -60,14 +72,14 @@ const savedSettings = loadSettings();
 const hasSavedSettings = savedSettings !== null;
 const ui = mergeSettings(DEFAULT_UI, savedSettings);
 
-// Up to v1.1 live traffic was one layer. mergeSettings drops keys it does not
-// know, so without this a saved view with traffic switched off would come back
-// with both halves on.
+// Live traffic was saved as `aircraft` up to v1.1 and as `aircraft3d` after,
+// when a 2D layer sat beside it; the 2D layer has gone but the name stays, so
+// views saved since carry over. mergeSettings drops keys it does not know, so
+// without this a v1.1 view with traffic switched off would come back with it on.
 if (savedSettings && savedSettings.layers
     && typeof savedSettings.layers.aircraft === 'boolean'
     && savedSettings.layers.aircraft3d === undefined) {
   ui.layers.aircraft3d = savedSettings.layers.aircraft;
-  ui.layers.aircraft2d = savedSettings.layers.aircraft;
 }
 
 let doc = null;        // raw envelope state
@@ -92,6 +104,7 @@ controls.dampingFactor = 0.08;
 controls.maxPolarAngle = Math.PI * 0.98;
 
 const aircraftLayer = new AircraftLayer();
+aircraftLayer.planeScale = ui.planeScale;
 scene.add(aircraftLayer.group);
 
 const slice = new SliceView(el('slice'));
@@ -104,6 +117,10 @@ let horizonGroup = null;
 let footprintGroup = null;
 let basemap = null;      // loaded tiles and texture, built once
 let basemapMesh = null;  // rebuilt whenever the projection changes
+let heat = null;         // the collector's heatmap, refetched every few minutes
+let heatVolumeTex = null;   // the routes as tubes in a 3D texture
+let heatVolumeKey = null;
+let heatVolume = null;   // the counts in the air, at the heights flown
 
 function viewOpts() {
   return {
@@ -180,6 +197,7 @@ function rebuildScene() {
     basemapMesh = buildBasemapDisc(basemap, doc.rx, radius, opts, ui.mapOpacity);
     scene.add(basemapMesh);
   }
+  rebuildHeat();
   applyLayerVisibility();
   // Re-filtered here as well as on each poll, because changing the altitude
   // window has to take effect without waiting for the next second of data.
@@ -194,7 +212,28 @@ function applyLayerVisibility() {
   if (horizonGroup) horizonGroup.visible = ui.layers.horizon;
   if (footprintGroup) footprintGroup.visible = ui.layers.footprint;
   if (basemapMesh) basemapMesh.visible = ui.layers.basemap;
-  aircraftLayer.setVisibility(ui.layers.aircraft3d, ui.layers.aircraft2d);
+  if (heatVolume) heatVolume.visible = ui.layers.heat;
+  aircraftLayer.setVisibility(ui.layers.aircraft3d);
+}
+
+function rebuildHeat() {
+  disposeGroup(heatVolume);
+  heatVolume = null;
+  if (!heat) return;
+  // The tubes depend on the data, on which routes pass the minimum hits, and on
+  // the exaggeration, which sets how tall a round tube is in feet. The altitude
+  // window and colour mode are applied by the shader, so they rebuild nothing.
+  const key = `${heat.meta.updated}|${ui.heatMinHits}|${ui.exag}`;
+  if (heatVolumeKey !== key) {
+    if (heatVolumeTex) heatVolumeTex.dispose();
+    heatVolumeTex = buildTubeTexture(heat, { minHits: ui.heatMinHits, exag: ui.exag });
+    heatVolumeKey = key;
+  }
+  heatVolume = buildHeatVolume(heatVolumeTex, viewOpts(), ui.heatOpacity);
+  if (heatVolume) {
+    heatVolume.visible = ui.layers.heat;
+    scene.add(heatVolume);
+  }
 }
 
 async function initBasemap() {
@@ -247,6 +286,19 @@ async function refreshEnvelope(first) {
   }
 }
 
+async function refreshHeat() {
+  try {
+    heat = await loadHeatmap(HEAT_URL);
+    rebuildHeat();
+    renderHeatStats();
+  } catch (err) {
+    // A collector older than the heatmap, or a new one that has not saved yet.
+    // Everything else works without it, so this is no reason for the status line.
+    console.info(`heat footprint unavailable: ${err.message}`);
+    if (!heat) el('heatGroup').hidden = true;
+  }
+}
+
 async function refreshAircraft() {
   try {
     const resp = await fetch(AIRCRAFT_URL, { cache: 'no-store' });
@@ -265,6 +317,11 @@ async function refreshAircraft() {
         az: ac.r_dir,
         rangeNm: ac.r_dst,
         altFt: alt,
+        track: typeof ac.track === 'number' ? ac.track : null,
+        vs: typeof ac.geom_rate === 'number' ? ac.geom_rate
+          : typeof ac.baro_rate === 'number' ? ac.baro_rate : null,
+        gs: typeof ac.gs === 'number' ? ac.gs : null,
+        shape: shapeFor(ac.category, typeOf(ac.hex)),
       });
     }
     contacts = out;
@@ -307,6 +364,19 @@ function renderStats() {
     ['positions', s.samples.toLocaleString()],
     ['max range', `${s.maxRangeNm.toFixed(1)} nm`],
     ['at', `${String(s.maxRangeAz).padStart(3, '0')}° / ${s.maxRangeAltFt.toLocaleString()} ft`],
+    ['updated', fmtTime(s.updated)],
+  ]);
+}
+
+function renderHeatStats() {
+  if (!heat) return;
+  const s = summarizeHeat(heat);
+  const days = Math.max(0, (s.updated - s.created) / 86400);
+  el('heatGroup').hidden = false;
+  el('heatSince').textContent = `Collected over ${days.toFixed(1)} days`;
+  defList(el('heatStats'), [
+    ['positions', s.samples.toLocaleString()],
+    ['cells', `${s.lit.toLocaleString()} / ${heat.cells.toLocaleString()}`],
     ['updated', fmtTime(s.updated)],
   ]);
 }
@@ -447,6 +517,7 @@ function animate() {
   requestAnimationFrame(animate);
   if (ui.view === 'slice') return;
   controls.update();
+  aircraftLayer.fitToView(camera, sceneCanvas.clientHeight);
   renderer.render(scene, camera);
 }
 
@@ -464,6 +535,22 @@ function onViewOptionChange() {
 
 function bindCheckbox(id, apply) {
   el(id).addEventListener('change', (ev) => apply(ev.target.checked));
+}
+
+/**
+ * The heat threshold's slider stops. Busy cells hold thousands of hits and quiet
+ * ones a handful, so evenly spaced steps would spend the whole slider on one end;
+ * these go up by roughly doubling instead.
+ */
+const HEAT_HITS_STEPS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
+
+/** The slider stop nearest a saved threshold. */
+function heatHitsStep(hits) {
+  let best = 0;
+  HEAT_HITS_STEPS.forEach((v, i) => {
+    if (Math.abs(Math.log(v / hits)) < Math.abs(Math.log(HEAT_HITS_STEPS[best] / hits))) best = i;
+  });
+  return best;
 }
 
 function bindRange(id, outId, format, apply) {
@@ -492,10 +579,10 @@ function applyUiToControls() {
     layerContours: ui.layers.contours,
     layerHorizon: ui.layers.horizon,
     layerAircraft3d: ui.layers.aircraft3d,
-    layerAircraft2d: ui.layers.aircraft2d,
     layerGround: ui.layers.ground,
     layerBasemap: ui.layers.basemap,
     layerFootprint: ui.layers.footprint,
+    layerHeat: ui.layers.heat,
     // Before extendHorizon, which switches it off: restoring them the other way
     // round would let curvature undo the extension it was meant to accompany.
     curvature: ui.curvature,
@@ -513,9 +600,12 @@ function applyUiToControls() {
 
   const ranges = {
     mapOpacity: Math.round(ui.mapOpacity * 100),
+    heatLevel: Math.round(ui.heatOpacity * 100),
+    planeSize: Math.round(ui.planeScale * 100),
     exag: ui.exag,
     smooth: ui.smoothDeg,
     hits: ui.minHits,
+    heatHits: heatHitsStep(ui.heatMinHits),
     sliceAz: ui.sliceAz,
     sliceSpread: ui.sliceSpread,
   };
@@ -568,11 +658,13 @@ function wireUi() {
   bindCheckbox('layerContours', (v) => { ui.layers.contours = v; applyLayerVisibility(); });
   bindCheckbox('layerHorizon', (v) => { ui.layers.horizon = v; applyLayerVisibility(); });
   bindCheckbox('layerAircraft3d', (v) => { ui.layers.aircraft3d = v; applyLayerVisibility(); });
-  bindCheckbox('layerAircraft2d', (v) => { ui.layers.aircraft2d = v; applyLayerVisibility(); });
   bindCheckbox('layerGround', (v) => { ui.layers.ground = v; applyLayerVisibility(); });
   bindCheckbox('layerBasemap', (v) => { ui.layers.basemap = v; applyLayerVisibility(); });
   bindCheckbox('layerFootprint', (v) => {
     ui.layers.footprint = v; applyLayerVisibility();
+  });
+  bindCheckbox('layerHeat', (v) => {
+    ui.layers.heat = v; applyLayerVisibility();
   });
   // Curvature and the extended horizon cannot both be meaningful. With curvature
   // on, on-screen height is altitude minus the earth's drop at that range, so two
@@ -621,6 +713,14 @@ function wireUi() {
     ui.mapOpacity = v / 100;
     if (basemapMesh) basemapMesh.material.opacity = ui.mapOpacity;
   });
+  bindRange('heatLevel', 'heatLevelOut', (v) => `${v}%`, (v) => {
+    ui.heatOpacity = v / 100;
+    if (heatVolume) heatVolume.material.uniforms.uOpacity.value = ui.heatOpacity;
+  });
+  bindRange('planeSize', 'planeSizeOut', (v) => `${v}%`, (v) => {
+    ui.planeScale = v / 100;
+    aircraftLayer.planeScale = ui.planeScale;
+  });
 
   bindCheckbox('curvature', (v) => {
     ui.curvature = v;
@@ -648,6 +748,10 @@ function wireUi() {
   });
   bindRange('hits', 'hitsOut', (v) => String(v), (v) => {
     ui.minHits = v; onDataOptionChange();
+  });
+  bindRange('heatHits', 'heatHitsOut', (v) => HEAT_HITS_STEPS[v].toLocaleString(), (v) => {
+    ui.heatMinHits = HEAT_HITS_STEPS[v];
+    rebuildHeat();
   });
   bindRange('sliceAz', 'azOut', (v) => `${String(v).padStart(3, '0')}&deg;`, (v) => {
     ui.sliceAz = v; if (ui.view === 'slice') drawSlice();
@@ -709,9 +813,11 @@ animate();
 await refreshEnvelope(true);
 setView(ui.view);
 initBasemap();
+refreshHeat();
 await refreshAircraft();
 setStatus(null);
 setInterval(() => refreshEnvelope(false), ENVELOPE_REFRESH_MS);
+setInterval(refreshHeat, HEAT_REFRESH_MS);
 setInterval(async () => {
   await refreshAircraft();
   if (ui.view === 'slice') drawSlice();

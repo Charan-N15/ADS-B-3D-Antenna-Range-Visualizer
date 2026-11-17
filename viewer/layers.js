@@ -6,6 +6,7 @@ import {
 } from './geo.js';
 import { rangeAt, bandRange } from './envelope.js';
 import { altitudeCss } from './altitude.js';
+import { SHAPES, PLANE_PX } from './shapes.js';
 
 /** tar1090's ramp as a three colour. Cached: the ramp is a pure lookup. */
 const colorCache = new Map();
@@ -285,48 +286,92 @@ export function buildHorizonSurface(maxRangeNm, opts, extendToAltFt) {
   return group;
 }
 
-/** Ring sprite for the ground marks. Vertex colours multiply the texture, so the
-    white ring takes its aircraft's altitude colour while the black edges stay
-    black whatever that colour is — which is what keeps it legible over tiles. */
-let groundSprite = null;
-function groundMarkTexture() {
-  if (groundSprite) return groundSprite;
-  const size = 64;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  // Widest first, so the black band is left showing on both sides of the white.
-  for (const [width, style] of [[20, '#000'], [10, '#fff']]) {
-    ctx.beginPath();
-    ctx.arc(size / 2, size / 2, 22, 0, Math.PI * 2);
-    ctx.lineWidth = width;
-    ctx.strokeStyle = style;
-    ctx.stroke();
-  }
-  groundSprite = new THREE.CanvasTexture(canvas);
-  return groundSprite;
+const FLAT_COLOR = new THREE.Color(COLORS.aircraft);
+const _pos = new THREE.Vector3();
+const _euler = new THREE.Euler();
+const _quat = new THREE.Quaternion();
+const _scale = new THREE.Vector3();
+const _matrix = new THREE.Matrix4();
+
+/** Feet per minute in one knot, to put climb rate and ground speed in one unit. */
+const FPM_PER_KT = 101.27;
+
+/** Climb or descent slower than this is drawn level, so noise does not rock it. */
+const LEVEL_FPM = 150;
+
+/** The steepest an aircraft is ever tilted, however the exaggeration adds up. */
+const MAX_PITCH = 40 * Math.PI / 180;
+
+/** Shapes that do not fly along their nose, and so are never tilted. */
+const UNPITCHED = new Set(['helicopter', 'balloon', 'drone']);
+
+/**
+ * The angle an aircraft's path makes in the scene. A real climb is a few
+ * degrees, too little to see; but the scene stretches height by the vertical
+ * exaggeration, and so does this, so the aircraft points along the line it is
+ * actually tracing through the bowl.
+ */
+function scenePitch(c, exag) {
+  if (UNPITCHED.has(c.shape) || !Number.isFinite(c.vs) || !(c.gs > 0)) return 0;
+  if (Math.abs(c.vs) < LEVEL_FPM) return 0;
+  const angle = Math.atan((exag * c.vs) / (FPM_PER_KT * c.gs));
+  return Math.max(-MAX_PITCH, Math.min(MAX_PITCH, angle));
 }
 
-/** Live traffic: a point per aircraft plus a drop line to the surface below it. */
+/**
+ * Live traffic: a silhouette per aircraft at its altitude, pointed along its
+ * track and tilted to its climb, with a drop line to the surface below.
+ */
 export class AircraftLayer {
   constructor(capacity = 600) {
     this.capacity = capacity;
     this.group = new THREE.Group();
     this.group.name = 'aircraft';
     this.contacts = [];
+    this.planeScale = 1;
 
-    this.pointPositions = new Float32Array(capacity * 3);
-    this.pointColors = new Float32Array(capacity * 3);
-    const pointGeom = new THREE.BufferGeometry();
-    pointGeom.setAttribute('position',
-      new THREE.BufferAttribute(this.pointPositions, 3));
-    pointGeom.setAttribute('color',
-      new THREE.BufferAttribute(this.pointColors, 3));
-    this.points = new THREE.Points(pointGeom, new THREE.PointsMaterial({
-      color: COLORS.aircraft, size: 4, sizeAttenuation: false,
-    }));
-    this.points.frustumCulled = false;
+    this.headPositions = new Float32Array(capacity * 3);
+    this.headings = new Float32Array(capacity);
+    this.pitches = new Float32Array(capacity);
+    this.slotMesh = new Array(capacity);
+    this.slotIndex = new Int32Array(capacity);
+
+    // One instanced mesh per silhouette, so every aircraft of a kind is a single
+    // draw call. White base colour lets each instance's colour through as is.
+    //
+    // Drawn last: three.js paints translucent objects after opaque ones, so an
+    // opaque aircraft inside the bowl would be washed over by every surface
+    // layer in front of it. In the translucent pass with a high render order it
+    // lands on top instead, and keeps its altitude colour.
+    this.planes = new THREE.Group();
+    this.shapes = new Map();
+    for (const [name, def] of Object.entries(SHAPES)) {
+      const mesh = new THREE.InstancedMesh(def.geometry, new THREE.MeshBasicMaterial({
+        color: 0xffffff, vertexColors: true, transparent: true,
+      }), capacity);
+      mesh.renderOrder = 11;
+      mesh.name = `aircraft-${name}`;
+      mesh.userData.scale = def.scale;
+      mesh.frustumCulled = false;
+      mesh.setColorAt(0, FLAT_COLOR);   // allocates the per-instance colours
+      mesh.count = 0;
+
+      // The outline: a larger black copy showing only its back faces, drawn
+      // just before the aircraft. Wherever the aircraft covers it, the aircraft
+      // is nearer and wins; round the edge only the black is there. It shares
+      // the aircraft's matrices, so placing one places both.
+      const outline = new THREE.InstancedMesh(def.outline, new THREE.MeshBasicMaterial({
+        color: 0x000000, side: THREE.BackSide, transparent: true,
+      }), capacity);
+      outline.renderOrder = 10;
+      outline.instanceMatrix = mesh.instanceMatrix;
+      outline.frustumCulled = false;
+      outline.count = 0;
+      mesh.userData.outline = outline;
+
+      this.shapes.set(name, mesh);
+      this.planes.add(outline, mesh);
+    }
 
     this.dropPositions = new Float32Array(capacity * 6);
     const dropGeom = new THREE.BufferGeometry();
@@ -337,30 +382,14 @@ export class AircraftLayer {
     }));
     this.drops.frustumCulled = false;
 
-    // Shares the colour attribute with the points above, so each mark carries
-    // its own aircraft's altitude colour without a second colour buffer.
-    this.groundPositions = new Float32Array(capacity * 3);
-    const groundGeom = new THREE.BufferGeometry();
-    groundGeom.setAttribute('position',
-      new THREE.BufferAttribute(this.groundPositions, 3));
-    groundGeom.setAttribute('color', pointGeom.getAttribute('color'));
-    this.marks = new THREE.Points(groundGeom, new THREE.PointsMaterial({
-      color: COLORS.aircraft, map: groundMarkTexture(), size: 12,
-      sizeAttenuation: false, transparent: true, depthWrite: false,
-    }));
-    this.marks.frustumCulled = false;
-
-    this.group.add(this.points, this.drops, this.marks);
+    this.group.add(this.planes, this.drops);
   }
 
-  /** The pin standing above the map and the mark lying on it toggle apart. */
-  setVisibility(show3d, show2d) {
-    this.points.visible = show3d;
-    this.drops.visible = show3d;
-    this.marks.visible = show2d;
+  setVisibility(show) {
+    this.group.visible = show;
   }
 
-  /** contacts: [{hex, flight, az, rangeNm, altFt, ...}] */
+  /** contacts: [{hex, flight, az, rangeNm, altFt, track, shape, ...}] */
   setContacts(contacts) {
     this.contacts = contacts.slice(0, this.capacity);
   }
@@ -368,28 +397,30 @@ export class AircraftLayer {
   /** Re-projects the current contacts. Called whenever view options change. */
   update(opts) {
     const byAlt = Boolean(opts.colorByAlt);
-    this.points.material.vertexColors = byAlt;
-    this.points.material.color.set(byAlt ? 0xffffff : COLORS.aircraft);
-    this.points.material.needsUpdate = true;
-    this.marks.material.vertexColors = byAlt;
-    this.marks.material.color.set(byAlt ? 0xffffff : COLORS.aircraft);
-    this.marks.material.needsUpdate = true;
+
+    for (const mesh of this.shapes.values()) mesh.count = 0;
+    const fallback = this.shapes.get('generic');
 
     const n = this.contacts.length;
     for (let i = 0; i < n; i++) {
       const c = this.contacts[i];
       const [x, y, z] = project(c.az, c.rangeNm, c.altFt, opts);
-      this.pointPositions[i * 3] = x;
-      this.pointPositions[i * 3 + 1] = y;
-      this.pointPositions[i * 3 + 2] = z;
+      this.headPositions[i * 3] = x;
+      this.headPositions[i * 3 + 1] = y;
+      this.headPositions[i * 3 + 2] = z;
       const tint = altitudeThreeColor(Math.round(c.altFt / 100) * 100);
-      this.pointColors[i * 3] = tint.r;
-      this.pointColors[i * 3 + 1] = tint.g;
-      this.pointColors[i * 3 + 2] = tint.b;
+
+      // Track is degrees clockwise from north; the scene turns anticlockwise
+      // about +z from +y, hence the sign. No track, no turn: it points north.
+      this.headings[i] = Number.isFinite(c.track) ? -c.track * Math.PI / 180 : 0;
+      this.pitches[i] = scenePitch(c, opts.exag || 1);
+      const mesh = this.shapes.get(c.shape) || fallback;
+      const slot = mesh.count++;
+      mesh.setColorAt(slot, byAlt ? tint : FLAT_COLOR);
+      this.slotMesh[i] = mesh;
+      this.slotIndex[i] = slot;
+
       const [gx, gy, gz] = project(c.az, c.rangeNm, 0, opts);
-      this.groundPositions[i * 3] = gx;
-      this.groundPositions[i * 3 + 1] = gy;
-      this.groundPositions[i * 3 + 2] = gz;
       this.dropPositions[i * 6] = x;
       this.dropPositions[i * 6 + 1] = y;
       this.dropPositions[i * 6 + 2] = z;
@@ -397,13 +428,35 @@ export class AircraftLayer {
       this.dropPositions[i * 6 + 4] = gy;
       this.dropPositions[i * 6 + 5] = gz;
     }
-    this.points.geometry.setDrawRange(0, n);
-    this.points.geometry.attributes.position.needsUpdate = true;
-    this.points.geometry.attributes.color.needsUpdate = true;
+    for (const mesh of this.shapes.values()) {
+      mesh.instanceColor.needsUpdate = true;
+      mesh.userData.outline.count = mesh.count;
+    }
     this.drops.geometry.setDrawRange(0, n * 2);
     this.drops.geometry.attributes.position.needsUpdate = true;
-    this.marks.geometry.setDrawRange(0, n);
-    this.marks.geometry.attributes.position.needsUpdate = true;
+  }
+
+  /**
+   * Sizes each silhouette to a fixed length on screen, so an aircraft overhead
+   * and one two hundred miles out read the same. Runs every frame, since it
+   * depends on where the camera is.
+   */
+  fitToView(camera, heightPx) {
+    const n = this.contacts.length;
+    if (!this.planes.visible || n === 0) return;
+    const worldPerPx = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)
+      / Math.max(1, heightPx);
+    for (let i = 0; i < n; i++) {
+      const mesh = this.slotMesh[i];
+      _pos.fromArray(this.headPositions, i * 3);
+      _scale.setScalar(PLANE_PX * this.planeScale * mesh.userData.scale
+        * worldPerPx * camera.position.distanceTo(_pos));
+      // Pitch about the wing first, then turn onto the track: ZXY applies X
+      // before Z, so the climb stays along the aircraft's own nose.
+      _quat.setFromEuler(_euler.set(this.pitches[i], 0, this.headings[i], 'ZXY'));
+      mesh.setMatrixAt(this.slotIndex[i], _matrix.compose(_pos, _quat, _scale));
+    }
+    for (const mesh of this.shapes.values()) mesh.instanceMatrix.needsUpdate = true;
   }
 }
 

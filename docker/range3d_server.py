@@ -4,7 +4,7 @@
 Stands in for the lighttpd config install.sh writes on a Pi:
 
   /                  -> the viewer
-  /state/envelope.json -> the collector's state file, never cached
+  /state/<file>      -> the collector's envelope and heatmap, never cached
   /tar1090/<path>    -> reverse-proxied to the tar1090 instance (e.g. ultrafeeder),
                         so the viewer's ../tar1090/data/aircraft.json and its
                         "Return to 2D" link both work from one origin
@@ -35,6 +35,13 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 OPENER = urllib.request.build_opener(NoRedirect)
 
+# What the collector writes into its state directory, and how each is served.
+STATE_FILES = {
+    "envelope.json": "application/json",
+    "heatmap.json": "application/json",
+    "heatmap.bin": "application/octet-stream",
+}
+
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     viewer_dir = "/app/viewer"
@@ -54,8 +61,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
-        if path == "/state/envelope.json":
-            return self.serve_state()
+        if path.startswith("/state/") and path[len("/state/"):] in STATE_FILES:
+            return self.serve_state(path[len("/state/"):])
         if path == "/tar1090":
             return self.redirect("/tar1090/")
         if path.startswith("/tar1090/"):
@@ -74,15 +81,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-    def serve_state(self):
+    def serve_state(self, name):
+        # The collector writes the heatmap beside the envelope.
+        path = os.path.join(os.path.dirname(self.state_file), name)
         try:
-            with open(self.state_file, "rb") as fh:
+            with open(path, "rb") as fh:
                 body = fh.read()
         except OSError:
-            self.send_error(404, "no envelope yet; the collector writes one shortly")
+            self.send_error(404, "no %s yet; the collector writes one shortly" % name)
             return
         self.send_response(200)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", STATE_FILES[name])
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
