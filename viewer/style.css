@@ -272,6 +272,68 @@ button {
 
 button:hover { border-color: var(--accent); color: var(--accent); }
 
+/* A row of buttons that each switch one thing on or off, joined into a strip. */
+.seg {
+  display: flex;
+  margin: 2px 0 6px;
+  border: 1px solid var(--ctl);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.seg button {
+  padding: 5px 0;
+  color: var(--faint);
+  border: 0;
+  border-right: 1px solid var(--ctl);
+  border-radius: 0;
+}
+
+.seg button:last-child { border-right: 0; }
+.seg button:hover { color: var(--fg); border-color: var(--ctl); }
+.seg button.on { color: var(--panel); background: var(--accent); }
+
+/* What a label will look like, drawn the way the scene draws it. */
+.labelPreview {
+  position: relative;
+  height: 50px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.labelPreviewPlane {
+  position: absolute;
+  left: 13px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  background: var(--dim);
+  transform: rotate(45deg);
+}
+
+.labelPreviewBox {
+  position: absolute;
+  left: 25px;
+  bottom: 10px;
+  padding: 3px 5px;
+  color: var(--fg);
+  background: rgba(15, 16, 18, 0.8);
+  border: 1px solid var(--ctl);
+  font: 12px/14px var(--mono);
+  white-space: pre;
+}
+
+.labelPreviewEmpty {
+  position: absolute;
+  left: 25px;
+  bottom: 10px;
+  color: var(--faint);
+  font-size: var(--size-small);
+}
+
+.labelPreviewBox[hidden], .labelPreviewEmpty[hidden] { display: none; }
+
 #settingsNote {
   margin: 6px 0 0;
   min-height: 14px;
@@ -324,7 +386,10 @@ dd {
 #stage { position: relative; flex: 1; min-width: 0; }
 
 #scene, #slice { display: block; width: 100%; height: 100%; }
-#scene[hidden], #slice[hidden] { display: none; }
+#scene[hidden], #slice[hidden], #labels[hidden] { display: none; }
+
+/* Live traffic's data blocks, over the scene. Clicks go through to the surface. */
+#labels { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 #slice { background: var(--bg); }
 
 #hint {

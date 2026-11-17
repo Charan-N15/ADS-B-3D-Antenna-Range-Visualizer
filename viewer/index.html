@@ -67,6 +67,7 @@
           <label class="sub" id="extendHorizonRow" hidden><input type="checkbox" id="extendHorizon"> Extend to top</label>
           <label><input type="checkbox" id="layerFootprint" checked> Ground footprint</label>
           <label><input type="checkbox" id="layerAircraft3d" checked> Live traffic</label>
+          <label class="sub" id="labelsRow"><input type="checkbox" id="layerLabels"> Labels</label>
           <label><input type="checkbox" id="layerGround" checked> Range rings</label>
           <label><input type="checkbox" id="layerBasemap" checked> Map</label>
           <label><input type="checkbox" id="curvature" checked> Earth curvature</label>
@@ -88,6 +89,20 @@
             <input type="range" id="smooth" min="1" max="15" step="2" value="7"></label>
           <label class="slider">Plane size <span id="planeSizeOut">100%</span>
             <input type="range" id="planeSize" min="50" max="250" step="10" value="100"></label>
+        </div>
+
+        <div class="grp">
+          <h2>Labels</h2>
+          <div class="seg" id="labelFields" role="group" aria-label="Label fields">
+            <button type="button" data-field="callsign">Callsign</button>
+            <button type="button" data-field="altitude">Altitude</button>
+            <button type="button" data-field="type">Type</button>
+          </div>
+          <div class="labelPreview">
+            <i class="labelPreviewPlane"></i>
+            <span class="labelPreviewBox" id="labelPreviewBox"></span>
+            <span class="labelPreviewEmpty" id="labelPreviewEmpty" hidden>nothing to show</span>
+          </div>
         </div>
 
         <div class="grp">
@@ -152,6 +167,7 @@
 
   <div id="stage">
     <canvas id="scene"></canvas>
+    <canvas id="labels"></canvas>
     <canvas id="slice" hidden></canvas>
     <div id="hint">drag to orbit &middot; wheel to zoom &middot; click the surface for the contact that set it</div>
     <div id="attribution"></div>

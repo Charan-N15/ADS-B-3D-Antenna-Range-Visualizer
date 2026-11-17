@@ -17,6 +17,8 @@ import {
 import { SliceView } from './slice.js';
 import { TAR1090_PATH } from './config.js';
 import { initTypes, typeOf, shapeFor } from './types.js';
+import { LabelLayer, LABEL_PRESETS, presetIndex, labelLines } from './labels.js';
+import { PLANE_PX } from './shapes.js';
 import {
   loadHeatmap, buildTubeTexture, buildHeatVolume, summarizeHeat,
 } from './heat.js';
@@ -46,8 +48,9 @@ const DEFAULT_UI = {
   layers: {
     envelope: true, contours: true, horizon: false, ground: true,
     basemap: true, footprint: true, aircraft3d: true,
-    heat: false,
+    heat: false, labels: false,
   },
+  labelFields: { ...LABEL_PRESETS[1] },
   heatMinHits: 1000,
   extendHorizon: false,
   altMinFt: 0,
@@ -111,6 +114,8 @@ controls.maxPolarAngle = Math.PI * 0.98;
 const aircraftLayer = new AircraftLayer();
 aircraftLayer.planeScale = ui.planeScale;
 scene.add(aircraftLayer.group);
+
+const labelLayer = new LabelLayer(el('labels'));
 
 const slice = new SliceView(el('slice'));
 const raycaster = new THREE.Raycaster();
@@ -383,6 +388,7 @@ async function refreshAircraft() {
       }
       let alt = typeof ac.alt_geom === 'number' ? ac.alt_geom : ac.alt_baro;
       if (typeof alt !== 'number') continue;
+      const info = typeOf(ac.hex);
       out.push({
         hex: ac.hex,
         flight: (ac.flight || '').trim(),
@@ -394,7 +400,13 @@ async function refreshAircraft() {
         vs: typeof ac.geom_rate === 'number' ? ac.geom_rate
           : typeof ac.baro_rate === 'number' ? ac.baro_rate : null,
         gs: typeof ac.gs === 'number' ? ac.gs : null,
-        shape: shapeFor(ac.category, typeOf(ac.hex)),
+        shape: shapeFor(ac.category, info),
+        // For the label. Flight levels are pressure altitude, so it is the
+        // barometric reading there, where the scene places by the geometric.
+        type: info ? info.type : null,
+        squawk: ac.squawk || null,
+        labelAltFt: typeof ac.alt_baro === 'number' ? ac.alt_baro : alt,
+        onGround: ac.alt_baro === 'ground',
       });
     }
     contacts = out;
@@ -544,6 +556,7 @@ function setView(name) {
   sceneCanvas.hidden = isSlice;
   el('sliceControls').hidden = !isSlice;
   el('hint').hidden = isSlice;
+  el('labels').hidden = isSlice;
 
   // The bearing and spread controls live in the view section, so switching to
   // slice without opening it would hide the only controls that view has.
@@ -587,6 +600,7 @@ function resize() {
   renderer.setSize(rect.width, rect.height, false);
   camera.aspect = rect.width / Math.max(1, rect.height);
   camera.updateProjectionMatrix();
+  labelLayer.resize(rect.width, rect.height, window.devicePixelRatio || 1);
   if (ui.view === 'slice') drawSlice();
 }
 
@@ -596,6 +610,56 @@ function animate() {
   controls.update();
   aircraftLayer.fitToView(camera, sceneCanvas.clientHeight);
   renderer.render(scene, camera);
+  const showLabels = ui.layers.labels && ui.layers.aircraft3d;
+  labelLayer.draw(showLabels ? aircraftLayer : null, camera, ui.labelFields,
+    PLANE_PX * ui.planeScale);
+}
+
+// --------------------------------------------------------------------- labels
+
+/** A made-up aircraft, so the preview shows every field even with no traffic. */
+const LABEL_SAMPLE = {
+  hex: 'a1b2c3', flight: 'UAL1234', type: 'B738', labelAltFt: 35000, vs: -1200,
+};
+
+/** Puts the chosen label fields onto the strip's buttons and the preview box. */
+function renderLabelFields() {
+  for (const button of document.querySelectorAll('#labelFields button')) {
+    const on = Boolean(ui.labelFields[button.dataset.field]);
+    button.classList.toggle('on', on);
+    button.setAttribute('aria-pressed', String(on));
+  }
+  const lines = labelLines(LABEL_SAMPLE, ui.labelFields);
+  const box = el('labelPreviewBox');
+  box.textContent = lines.join('\n');
+  box.hidden = !lines.length;
+  el('labelPreviewEmpty').hidden = lines.length > 0;
+}
+
+function setLabelsShown(on) {
+  const box = el('layerLabels');
+  if (box.checked === on) return;
+  box.checked = on;
+  box.dispatchEvent(new Event('change'));
+}
+
+/** O: the next preset after the one showing, or the first after a mix of one's own. */
+function cycleLabelPreset() {
+  const next = (presetIndex(ui.labelFields) + 1) % LABEL_PRESETS.length;
+  ui.labelFields = { ...LABEL_PRESETS[next] };
+  renderLabelFields();
+  // Pressing O with labels off would otherwise appear to do nothing.
+  setLabelsShown(true);
+}
+
+/** Keys typed into a text or number box are that box's, not shortcuts. */
+function isTyping(target) {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') {
+    return true;
+  }
+  return target.tagName === 'INPUT'
+    && !['checkbox', 'range', 'button', 'radio'].includes(target.type);
 }
 
 // ------------------------------------------------------------------------- UI
@@ -660,6 +724,7 @@ function applyUiToControls() {
     layerBasemap: ui.layers.basemap,
     layerFootprint: ui.layers.footprint,
     layerHeat: ui.layers.heat,
+    layerLabels: ui.layers.labels,
     // Before extendHorizon, which switches it off: restoring them the other way
     // round would let curvature undo the extension it was meant to accompany.
     curvature: ui.curvature,
@@ -694,6 +759,7 @@ function applyUiToControls() {
   el('altMin').value = String(ui.altMinFt);
   el('altMax').value = String(ui.altMaxFt);
   el('altLegendGroup').hidden = !ui.colorByAlt;
+  renderLabelFields();
   showSection(ui.section);
   setPanelCollapsed(ui.panelCollapsed);
 }
@@ -743,7 +809,34 @@ function wireUi() {
     }
     applyLayerVisibility();
   });
-  bindCheckbox('layerAircraft3d', (v) => { ui.layers.aircraft3d = v; applyLayerVisibility(); });
+  // Labels hang off the traffic, so their switch sits under it and goes with it.
+  bindCheckbox('layerAircraft3d', (v) => {
+    ui.layers.aircraft3d = v;
+    el('labelsRow').hidden = !v;
+    applyLayerVisibility();
+  });
+  bindCheckbox('layerLabels', (v) => { ui.layers.labels = v; });
+  for (const button of document.querySelectorAll('#labelFields button')) {
+    button.addEventListener('click', () => {
+      const field = button.dataset.field;
+      ui.labelFields = { ...ui.labelFields, [field]: !ui.labelFields[field] };
+      renderLabelFields();
+    });
+  }
+
+  // The same keys as tar1090: L for labels, O for how much they say.
+  window.addEventListener('keydown', (ev) => {
+    if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.repeat || isTyping(ev.target)) return;
+    const key = ev.key.toLowerCase();
+    if (key === 'l') {
+      setLabelsShown(!ui.layers.labels);
+    } else if (key === 'o') {
+      cycleLabelPreset();
+    } else {
+      return;
+    }
+    ev.preventDefault();
+  });
   bindCheckbox('layerGround', (v) => { ui.layers.ground = v; applyLayerVisibility(); });
   bindCheckbox('layerBasemap', (v) => { ui.layers.basemap = v; applyLayerVisibility(); });
   bindCheckbox('layerFootprint', (v) => {
