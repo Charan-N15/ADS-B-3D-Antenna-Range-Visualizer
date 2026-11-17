@@ -34,6 +34,8 @@ initTypes(TAR1090_URL);
 const ENVELOPE_REFRESH_MS = 60000;
 // The collector rewrites the heatmap every five minutes; no point asking sooner.
 const HEAT_REFRESH_MS = 300000;
+// The map is always drawn at full strength; the darkened tiles carry no glare.
+const MAP_OPACITY = 1;
 const AIRCRAFT_REFRESH_MS = 1000;
 const CONTOUR_ALTITUDES = [2000, 5000, 10000, 20000, 30000, 40000];
 
@@ -46,9 +48,7 @@ const DEFAULT_UI = {
     basemap: true, footprint: true, aircraft3d: true,
     heat: false,
   },
-  mapOpacity: 1,
-  heatOpacity: 0.85,
-  heatMinHits: 500,
+  heatMinHits: 1000,
   extendHorizon: false,
   altMinFt: 0,
   altMaxFt: 50000,
@@ -194,7 +194,7 @@ function rebuildScene() {
 
   if (basemap && doc?.rx?.lat != null) {
     const radius = Math.min(maxRangeNm, basemap.meta.radiusNm);
-    basemapMesh = buildBasemapDisc(basemap, doc.rx, radius, opts, ui.mapOpacity);
+    basemapMesh = buildBasemapDisc(basemap, doc.rx, radius, opts, MAP_OPACITY);
     scene.add(basemapMesh);
   }
   rebuildHeat();
@@ -229,7 +229,7 @@ function rebuildHeat() {
     heatVolumeTex = buildTubeTexture(heat, { minHits: ui.heatMinHits, exag: ui.exag });
     heatVolumeKey = key;
   }
-  heatVolume = buildHeatVolume(heatVolumeTex, viewOpts(), ui.heatOpacity);
+  heatVolume = buildHeatVolume(heatVolumeTex, viewOpts());
   if (heatVolume) {
     heatVolume.visible = ui.layers.heat;
     scene.add(heatVolume);
@@ -599,8 +599,6 @@ function applyUiToControls() {
   }
 
   const ranges = {
-    mapOpacity: Math.round(ui.mapOpacity * 100),
-    heatLevel: Math.round(ui.heatOpacity * 100),
     planeSize: Math.round(ui.planeScale * 100),
     exag: ui.exag,
     smooth: ui.smoothDeg,
@@ -663,8 +661,13 @@ function wireUi() {
   bindCheckbox('layerFootprint', (v) => {
     ui.layers.footprint = v; applyLayerVisibility();
   });
+  // The heat's threshold only means anything while the heat is showing, so its
+  // slider sits under the switch and appears with it. Switched off and on again,
+  // it comes back at the same setting.
   bindCheckbox('layerHeat', (v) => {
-    ui.layers.heat = v; applyLayerVisibility();
+    ui.layers.heat = v;
+    el('heatHitsRow').hidden = !v;
+    applyLayerVisibility();
   });
   // Curvature and the extended horizon cannot both be meaningful. With curvature
   // on, on-screen height is altitude minus the earth's drop at that range, so two
@@ -709,14 +712,6 @@ function wireUi() {
     applyAltFilter();
   });
 
-  bindRange('mapOpacity', 'mapOpacityOut', (v) => `${v}%`, (v) => {
-    ui.mapOpacity = v / 100;
-    if (basemapMesh) basemapMesh.material.opacity = ui.mapOpacity;
-  });
-  bindRange('heatLevel', 'heatLevelOut', (v) => `${v}%`, (v) => {
-    ui.heatOpacity = v / 100;
-    if (heatVolume) heatVolume.material.uniforms.uOpacity.value = ui.heatOpacity;
-  });
   bindRange('planeSize', 'planeSizeOut', (v) => `${v}%`, (v) => {
     ui.planeScale = v / 100;
     aircraftLayer.planeScale = ui.planeScale;

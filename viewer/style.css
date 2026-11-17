@@ -150,6 +150,31 @@ h2 {
   color: var(--faint);
 }
 
+/* A group that folds away behind its heading, for the settings that are set
+   once and left. The browser's own details element, so the keyboard opens it. */
+details.grp > summary {
+  display: flex;
+  align-items: center;
+  list-style: none;
+  font-size: var(--size);
+  font-weight: 500;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+details.grp > summary::-webkit-details-marker { display: none; }
+
+details.grp > summary::after {
+  content: "\203A";
+  margin-left: auto;
+  color: var(--faint);
+  transition: transform 0.15s;
+}
+
+details.grp > summary:hover::after { color: var(--accent); }
+details.grp[open] > summary { margin-bottom: 7px; }
+details.grp[open] > summary::after { transform: rotate(90deg); }
+
 /* ---------------------------------------------------------------- controls */
 
 label {
@@ -163,6 +188,8 @@ label {
 
 label:hover { color: var(--fg); }
 label.sub { padding-left: 14px; }
+/* label sets its own display, which outranks the hidden attribute's; restore it. */
+label[hidden] { display: none; }
 
 /* A switch, not a tick box: with a single warm accent the knob's position
    carries the on/off state instead of colour alone having to. */

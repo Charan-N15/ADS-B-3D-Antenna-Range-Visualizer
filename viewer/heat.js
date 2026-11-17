@@ -45,6 +45,9 @@ const VOLUME_DENSITY = 0.6;
 /** Colour is brightened by this much before it is laid down. */
 const VOLUME_GAIN = 1.35;
 
+/** The tubes' overall opacity, so the map and the aircraft still show through. */
+const VOLUME_OPACITY = 0.85;
+
 /** The colour ramp is looked up from a strip this many texels long, 0 to 50,000 ft. */
 const RAMP_TEXELS = 256;
 const RAMP_TOP_FT = 50000;
@@ -365,7 +368,7 @@ void main() {
  * its line of sight through the tube texture. Reads from any angle, side-on
  * included, and the altitude filter cuts it at exactly the heights asked for.
  */
-export function buildHeatVolume(tubes, opts, opacity) {
+export function buildHeatVolume(tubes, opts) {
   if (!tubes) return null;
   const { x0, y0, width, height, layers, spacingFt, topFt } = tubes.userData;
   const x1 = x0 + width;
@@ -399,7 +402,7 @@ export function buildHeatVolume(tubes, opts, opacity) {
       uAltMax: { value: opts.altMaxFt ?? RAMP_TOP_FT },
       uDensity: { value: VOLUME_DENSITY },
       uGain: { value: VOLUME_GAIN },
-      uOpacity: { value: opacity },
+      uOpacity: { value: VOLUME_OPACITY },
       uByAlt: { value: opts.colorByAlt ? 1 : 0 },
       uFlat: { value: new THREE.Vector3(flat.r, flat.g, flat.b) },
     },
