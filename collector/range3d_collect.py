@@ -36,9 +36,9 @@ ACCEPTED_TYPES = ("adsb_icao", "adsb_icao_nt", "adsb_other")
 MAX_RANGE_NM = 350.0
 
 # The top of every altitude band, envelope and heatmap alike. High enough for the
-# U-2 and Global Hawk, which cruise around 60,000 ft; a report of exactly the top
-# still counts, in the highest band.
-ALT_TOP_FT = 60000
+# business jets that cruise up to 51,000 ft, with a little room over; a report of
+# exactly the top still counts, in the highest band.
+ALT_TOP_FT = 53000
 MAX_ALT_FT = ALT_TOP_FT
 MIN_NIC = 7
 MAX_RC_M = 1852
@@ -48,12 +48,13 @@ def build_band_edges():
     """Altitude band edges in feet. Fine low down, coarse at cruise."""
     edges = []
     for lo, hi, step in ((0, 2000, 250), (2000, 10000, 500),
-                         (10000, 25000, 1000), (25000, ALT_TOP_FT, 2500)):
+                         (10000, 25000, 1000), (25000, 50000, 2500)):
         alt = lo
         while alt < hi:
             edges.append(alt)
             alt += step
-    edges.append(ALT_TOP_FT)
+    # One last band above 50,000 ft, up to the top.
+    edges += [50000, ALT_TOP_FT]
     return edges
 
 
@@ -68,6 +69,26 @@ def extends(old, new):
             and new[:len(old)] == old)
 
 
+def from_60k(path, doc):
+    """Brings a state file from the 60,000 ft build down to this one's bands.
+
+    The band from 50,000 ft keeps its number and now reaches 53,000 ft; the
+    bands above it are dropped, with any cells in them. The file as it was is
+    kept beside it.
+    """
+    top = N_BANDS - 1
+    dropped = [key for key in doc.get("cells", {}) if int(key.split(",")[1]) > top]
+    for key in dropped:
+        del doc["cells"][key]
+    doc["bandEdges"] = BAND_EDGES
+    backup = path + ".before-53000ft"
+    if not os.path.exists(backup):
+        shutil.copy2(path, backup)
+    print("%s: bands brought down from 60,000 to %s ft, %d cells above that "
+          "dropped; the old file is kept as %s"
+          % (path, f"{ALT_TOP_FT:,}", len(dropped), backup), flush=True)
+
+
 def back_up(path, old_top_ft):
     """Keeps a copy of a file as it was before its bands were extended."""
     backup = "%s.before-%dft" % (path, ALT_TOP_FT)
@@ -79,6 +100,11 @@ def back_up(path, old_top_ft):
 
 BAND_EDGES = build_band_edges()
 N_BANDS = len(BAND_EDGES) - 1
+
+# A development build briefly took the bands to 60,000 ft in 2,500 ft steps. Its
+# bands up to 50,000 ft are these ones, so its files are brought back down by
+# dropping whatever sits above the new top band.
+EDGES_60K = BAND_EDGES[:-1] + [52500, 55000, 57500, 60000]
 
 
 # --------------------------------------------------------------------- heatmap
@@ -95,6 +121,10 @@ N_BANDS = len(BAND_EDGES) - 1
 # eight is plenty for showing where traffic sits, and keeps the grid 6x smaller.
 
 HEAT_BAND_EDGES = [0, 2000, 5000, 10000, 15000, 20000, 30000, 40000, 50000, ALT_TOP_FT]
+
+# The 60,000 ft development build had the same bands with a higher top; its top
+# band becomes 50,000 to 53,000 ft as it stands.
+HEAT_EDGES_60K = HEAT_BAND_EDGES[:-1] + [60000]
 HEAT_N_BANDS = len(HEAT_BAND_EDGES) - 1
 HEAT_CELL_NM = 2.0
 HEAT_HALF_NM = MAX_RANGE_NM                         # the grid reaches as far as we accept
@@ -198,6 +228,9 @@ class Envelope:
             raise SystemExit("state file version %r is not %d; refusing to touch it"
                              % (doc.get("version"), STATE_VERSION))
         old_edges = doc.get("bandEdges")
+        if old_edges == EDGES_60K:
+            from_60k(path, doc)
+            old_edges = BAND_EDGES
         if old_edges != BAND_EDGES:
             if not extends(old_edges, BAND_EDGES):
                 raise SystemExit(
@@ -392,10 +425,18 @@ class Heatmap:
         grid_path = os.path.join(heat.weeks_dir, "grid.json")
         if os.path.exists(grid_path):
             with open(grid_path, "r", encoding="utf-8") as fh:
-                if json.load(fh) != heat.grid():
-                    raise SystemExit(
-                        "%s holds weeks counted on a different grid. Move the "
-                        "folder aside to start a new heatmap." % heat.weeks_dir)
+                stored = json.load(fh)
+            if dict(stored, bandEdges=HEAT_BAND_EDGES) == heat.grid() \
+                    and stored.get("bandEdges") == HEAT_EDGES_60K:
+                with open(grid_path, "w", encoding="utf-8") as fh:
+                    json.dump(heat.grid(), fh)
+                print("%s: top band relabelled from 50,000-60,000 to 50,000-%s ft"
+                      % (heat.weeks_dir, f"{ALT_TOP_FT:,}"), flush=True)
+                stored = heat.grid()
+            if stored != heat.grid():
+                raise SystemExit(
+                    "%s holds weeks counted on a different grid. Move the "
+                    "folder aside to start a new heatmap." % heat.weeks_dir)
         else:
             with open(grid_path, "w", encoding="utf-8") as fh:
                 json.dump(heat.grid(), fh)

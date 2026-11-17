@@ -558,8 +558,13 @@ export class AircraftLayer {
   }
 }
 
-/** Trails are drawn a little darker than the aircraft, so the aircraft stays on top. */
-const TRAIL_DIM = 0.7;
+/**
+ * Trails share the altitude colours with the envelope and its rings, so on their
+ * own they sink into them. Lifted this far toward white they read as a separate,
+ * lighter line on the same colour.
+ */
+const TRAIL_LIGHTEN = 0.45;
+const _white = new THREE.Color(0xffffff);
 
 /**
  * Where each aircraft has been, as one line per aircraft through every position
@@ -572,8 +577,12 @@ export class TrailLayer {
   constructor() {
     this.capacity = 0;
     this.geometry = new THREE.BufferGeometry();
-    this.lines = new THREE.LineSegments(this.geometry,
-      new THREE.LineBasicMaterial({ vertexColors: true }));
+    // Drawn after the envelope and the heat and without depth, so a trail behind
+    // the envelope's wall still shows through it, as the aircraft do.
+    this.lines = new THREE.LineSegments(this.geometry, new THREE.LineBasicMaterial({
+      vertexColors: true, transparent: true, depthTest: false, depthWrite: false,
+    }));
+    this.lines.renderOrder = 9;
     this.lines.name = 'trails';
     // The geometry changes every second; working out its bounds for culling
     // would cost more than drawing it.
@@ -600,7 +609,7 @@ export class TrailLayer {
     for (const points of trails) segments += Math.max(0, points.length - 1);
     this.grow(segments);
     const byAlt = Boolean(opts.colorByAlt);
-    const flat = FLAT_COLOR.clone().multiplyScalar(TRAIL_DIM);
+    const flat = FLAT_COLOR.clone();
     const tint = new THREE.Color();
 
     let v = 0;
@@ -610,7 +619,7 @@ export class TrailLayer {
       this.positions[v * 3 + 1] = y;
       this.positions[v * 3 + 2] = z;
       const c = byAlt
-        ? tint.copy(altitudeThreeColor(Math.round(p.altFt / 100) * 100)).multiplyScalar(TRAIL_DIM)
+        ? tint.copy(altitudeThreeColor(Math.round(p.altFt / 100) * 100)).lerp(_white, TRAIL_LIGHTEN)
         : flat;
       this.colors[v * 3] = c.r;
       this.colors[v * 3 + 1] = c.g;

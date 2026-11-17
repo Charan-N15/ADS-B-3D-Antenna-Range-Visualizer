@@ -42,7 +42,7 @@ const AIRCRAFT_REFRESH_MS = 1000;
 const CONTOUR_ALTITUDES = [2000, 5000, 10000, 20000, 30000, 40000];
 
 /** The highest altitude the collector keeps, and so the top of the filter. */
-const ALT_TOP_FT = 60000;
+const ALT_TOP_FT = 53000;
 
 const el = (id) => document.getElementById(id);
 
@@ -95,7 +95,7 @@ if (!ui.layers.horizon) ui.extendHorizon = false;
 
 // The filter topped out at 50,000 ft before the bands went higher, so a view saved
 // then with it wide open would now hide everything above 50,000.
-if (savedSettings && savedSettings.altMaxFt === 50000) ui.altMaxFt = ALT_TOP_FT;
+if (savedSettings && [50000, 60000].includes(savedSettings.altMaxFt)) ui.altMaxFt = ALT_TOP_FT;
 
 let doc = null;        // raw envelope state
 let model = null;      // gridded form

@@ -52,7 +52,7 @@ observations rather than inferences. The viewer can toggle it off.
 **Azimuth:** 1°, bin = `floor(bearing_true)`, 360 bins. Rendered with an adjustable
 boxcar smooth, default 5°, because single degrees are sparse at low altitude.
 
-**Altitude:** non-uniform, 53 bands. Detail belongs low down, where the horizon is
+**Altitude:** non-uniform, 50 bands. Detail belongs low down, where the horizon is
 doing the limiting:
 
 | Range | Step | Bands |
@@ -60,10 +60,12 @@ doing the limiting:
 | 0 – 2,000 ft | 250 ft | 8 |
 | 2,000 – 10,000 ft | 500 ft | 16 |
 | 10,000 – 25,000 ft | 1,000 ft | 15 |
-| 25,000 – 60,000 ft | 2,500 ft | 14 |
+| 25,000 – 50,000 ft | 2,500 ft | 10 |
+| 50,000 – 53,000 ft | 3,000 ft | 1 |
 
-53 bands × 360 bearings = 19,080 cells, most of them empty. The top reaches 60,000 ft
-for the U-2 and Global Hawk; a report of exactly 60,000 ft counts in the top band.
+50 bands × 360 bearings = 18,000 cells, most of them empty. The top reaches 53,000 ft,
+over the 51,000 ft ceiling of the highest business jets; a report of exactly 53,000 ft
+counts in the top band.
 Bands were added above 50,000 ft after release; an older state file is upgraded in
 place on first load, since bands on top leave every existing band number unchanged,
 and the original is kept beside it.
@@ -81,7 +83,7 @@ One bad position decode would otherwise inflate an all-time cell permanently. In
 - `type` must be `adsb_icao`, `adsb_icao_nt` or `adsb_other`. MLAT, Mode S and TIS-B
   positions are estimates, not receptions, and are dropped.
 - `lat`/`lon` present; `nic >= 7`; `rc <= 1852` m when present.
-- Range ≤ 350 NM, altitude ≤ 60,000 ft.
+- Range ≤ 350 NM, altitude ≤ 53,000 ft.
 - Each position is counted once. Fix time is `now - seen_pos` from the feed; a hex is
   only accepted when its fix time advances, so a 1 Hz poll of a stale record does not
   inflate the hit count.
@@ -143,7 +145,7 @@ and it gzips well.
 
 A second accumulator beside the envelope: where traffic flies, not how far it is
 heard. A square grid of 2 NM cells reaching 350 NM from the receiver in each
-direction, in ten coarse altitude bands up to 60,000 ft.
+direction, in nine coarse altitude bands up to 53,000 ft.
 
 A count is a **pass**: one aircraft going through one cell. An aircraft adds one to
 each cell it is heard in, and adds to the same cell again only after 30 minutes away

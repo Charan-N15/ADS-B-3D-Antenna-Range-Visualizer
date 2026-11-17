@@ -48,9 +48,9 @@ const VOLUME_GAIN = 1.35;
 /** The tubes' overall opacity, so the map and the aircraft still show through. */
 const VOLUME_OPACITY = 0.85;
 
-/** The colour ramp is looked up from a strip this many texels long, 0 to 60,000 ft. */
+/** The colour ramp is looked up from a strip this many texels long, 0 to 53,000 ft. */
 const RAMP_TEXELS = 256;
-const RAMP_TOP_FT = 60000;
+const RAMP_TOP_FT = 53000;
 
 const FLAT_COLOR = new THREE.Color(0xe8e8e8);
 const littleEndian = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
