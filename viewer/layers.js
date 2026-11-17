@@ -302,8 +302,29 @@ const LEVEL_FPM = 150;
 /** The steepest an aircraft is ever tilted, however the exaggeration adds up. */
 const MAX_PITCH = 40 * Math.PI / 180;
 
-/** Shapes that do not fly along their nose, and so are never tilted. */
+/** Shapes that do not fly along their nose, and so are never tilted or banked. */
 const UNPITCHED = new Set(['helicopter', 'balloon', 'drone']);
+
+/** Turns slower than this, degrees a second, are flown wings level. */
+const LEVEL_TURN_DEG_S = 0.15;
+
+/** The steepest bank ever drawn. Airliners rarely pass 30 degrees. */
+const MAX_BANK = 35 * Math.PI / 180;
+
+const KT_TO_MS = 0.514444;
+const GRAVITY = 9.81;
+
+/**
+ * The bank angle of a coordinated turn: tan(bank) = speed x turn rate / g. Not
+ * exaggerated like the climb, since bank is a roll about the aircraft's own nose
+ * and the scene does not stretch it. Positive is right wing down.
+ */
+function bankAngle(c) {
+  if (UNPITCHED.has(c.shape) || !Number.isFinite(c.turnRate) || !(c.gs > 0)) return 0;
+  if (Math.abs(c.turnRate) < LEVEL_TURN_DEG_S) return 0;
+  const bank = Math.atan((c.gs * KT_TO_MS * c.turnRate * Math.PI / 180) / GRAVITY);
+  return Math.max(-MAX_BANK, Math.min(MAX_BANK, bank));
+}
 
 /**
  * The angle an aircraft's path makes in the scene. A real climb is a few
@@ -333,6 +354,7 @@ export class AircraftLayer {
     this.headPositions = new Float32Array(capacity * 3);
     this.headings = new Float32Array(capacity);
     this.pitches = new Float32Array(capacity);
+    this.banks = new Float32Array(capacity);
     this.slotMesh = new Array(capacity);
     this.slotIndex = new Int32Array(capacity);
 
@@ -414,6 +436,7 @@ export class AircraftLayer {
       // about +z from +y, hence the sign. No track, no turn: it points north.
       this.headings[i] = Number.isFinite(c.track) ? -c.track * Math.PI / 180 : 0;
       this.pitches[i] = scenePitch(c, opts.exag || 1);
+      this.banks[i] = bankAngle(c);
       const mesh = this.shapes.get(c.shape) || fallback;
       const slot = mesh.count++;
       mesh.setColorAt(slot, byAlt ? tint : FLAT_COLOR);
@@ -451,9 +474,9 @@ export class AircraftLayer {
       _pos.fromArray(this.headPositions, i * 3);
       _scale.setScalar(PLANE_PX * this.planeScale * mesh.userData.scale
         * worldPerPx * camera.position.distanceTo(_pos));
-      // Pitch about the wing first, then turn onto the track: ZXY applies X
-      // before Z, so the climb stays along the aircraft's own nose.
-      _quat.setFromEuler(_euler.set(this.pitches[i], 0, this.headings[i], 'ZXY'));
+      // Roll about the nose, pitch about the wing, then turn onto the track:
+      // ZXY applies Y, then X, then Z, so bank and climb stay the aircraft's own.
+      _quat.setFromEuler(_euler.set(this.pitches[i], this.banks[i], this.headings[i], 'ZXY'));
       mesh.setMatrixAt(this.slotIndex[i], _matrix.compose(_pos, _quat, _scale));
     }
     for (const mesh of this.shapes.values()) mesh.instanceMatrix.needsUpdate = true;

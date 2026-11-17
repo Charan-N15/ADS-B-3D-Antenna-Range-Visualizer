@@ -82,6 +82,11 @@ if (savedSettings && savedSettings.layers
   ui.layers.aircraft3d = savedSettings.layers.aircraft;
 }
 
+// Extend to top is hidden while the horizon is off, so a view saved before that
+// with it on and the horizon off would come back with curvature switched off
+// and nothing on screen saying why.
+if (!ui.layers.horizon) ui.extendHorizon = false;
+
 let doc = null;        // raw envelope state
 let model = null;      // gridded form
 let maxRangeNm = 100;
@@ -299,6 +304,54 @@ async function refreshHeat() {
   }
 }
 
+/**
+ * Seconds of track history a turn rate is fitted over. Track arrives in steps,
+ * so the change between two polls jitters; a line through several seconds of it
+ * does not, and this is still short enough to catch a turn as it starts.
+ */
+const TURN_WINDOW_S = 8;
+const trackHistory = new Map();   // hex -> [{ t, track }], oldest first
+
+/**
+ * Degrees per second the aircraft's track is turning, positive to the right.
+ * Most receivers never hear a bank angle or turn rate reported, so it is worked
+ * out here from how the track changes, as the slope of a straight line fitted
+ * through the window. Zero until there is enough history to fit.
+ */
+function turnRate(hex, now, track) {
+  if (typeof track !== 'number') {
+    trackHistory.delete(hex);
+    return 0;
+  }
+  let history = trackHistory.get(hex);
+  if (!history) trackHistory.set(hex, history = []);
+  if (!history.length || history[history.length - 1].t < now) history.push({ t: now, track });
+  while (history[0].t < now - TURN_WINDOW_S) history.shift();
+  if (history.length < 3 || now - history[0].t < TURN_WINDOW_S / 2) return 0;
+
+  // Unwrapped so a turn through north does not read as 359 degrees at once.
+  let unwrapped = 0;
+  let prev = history[0].track;
+  let sumT = 0;
+  let sumA = 0;
+  const points = history.map(({ t, track: a }) => {
+    unwrapped += ((a - prev + 540) % 360) - 180;
+    prev = a;
+    sumT += t;
+    sumA += unwrapped;
+    return [t, unwrapped];
+  });
+  const meanT = sumT / points.length;
+  const meanA = sumA / points.length;
+  let num = 0;
+  let den = 0;
+  for (const [t, a] of points) {
+    num += (t - meanT) * (a - meanA);
+    den += (t - meanT) * (t - meanT);
+  }
+  return den > 0 ? num / den : 0;
+}
+
 async function refreshAircraft() {
   try {
     const resp = await fetch(AIRCRAFT_URL, { cache: 'no-store' });
@@ -318,6 +371,7 @@ async function refreshAircraft() {
         rangeNm: ac.r_dst,
         altFt: alt,
         track: typeof ac.track === 'number' ? ac.track : null,
+        turnRate: turnRate(ac.hex, snapshot.now, ac.track),
         vs: typeof ac.geom_rate === 'number' ? ac.geom_rate
           : typeof ac.baro_rate === 'number' ? ac.baro_rate : null,
         gs: typeof ac.gs === 'number' ? ac.gs : null,
@@ -325,6 +379,10 @@ async function refreshAircraft() {
       });
     }
     contacts = out;
+    // Forget aircraft that have not been heard for a while.
+    for (const [hex, history] of trackHistory) {
+      if (history[history.length - 1].t < snapshot.now - 60) trackHistory.delete(hex);
+    }
     aircraftLayer.setContacts(visibleContacts());
     aircraftLayer.update(viewOpts());
   } catch (err) {
@@ -654,7 +712,18 @@ function wireUi() {
 
   bindCheckbox('layerEnvelope', (v) => { ui.layers.envelope = v; applyLayerVisibility(); });
   bindCheckbox('layerContours', (v) => { ui.layers.contours = v; applyLayerVisibility(); });
-  bindCheckbox('layerHorizon', (v) => { ui.layers.horizon = v; applyLayerVisibility(); });
+  // Extending the horizon only means anything while the horizon is showing, so
+  // it appears with it. Unlike the heat threshold it is not kept while hidden:
+  // it switches curvature off, and that should never be left off out of sight.
+  bindCheckbox('layerHorizon', (v) => {
+    ui.layers.horizon = v;
+    el('extendHorizonRow').hidden = !v;
+    if (!v && ui.extendHorizon) {
+      el('extendHorizon').checked = false;
+      el('extendHorizon').dispatchEvent(new Event('change'));
+    }
+    applyLayerVisibility();
+  });
   bindCheckbox('layerAircraft3d', (v) => { ui.layers.aircraft3d = v; applyLayerVisibility(); });
   bindCheckbox('layerGround', (v) => { ui.layers.ground = v; applyLayerVisibility(); });
   bindCheckbox('layerBasemap', (v) => { ui.layers.basemap = v; applyLayerVisibility(); });
