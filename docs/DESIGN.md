@@ -52,7 +52,7 @@ observations rather than inferences. The viewer can toggle it off.
 **Azimuth:** 1°, bin = `floor(bearing_true)`, 360 bins. Rendered with an adjustable
 boxcar smooth, default 5°, because single degrees are sparse at low altitude.
 
-**Altitude:** non-uniform, 49 bands. Detail belongs low down, where the horizon is
+**Altitude:** non-uniform, 53 bands. Detail belongs low down, where the horizon is
 doing the limiting:
 
 | Range | Step | Bands |
@@ -60,9 +60,13 @@ doing the limiting:
 | 0 – 2,000 ft | 250 ft | 8 |
 | 2,000 – 10,000 ft | 500 ft | 16 |
 | 10,000 – 25,000 ft | 1,000 ft | 15 |
-| 25,000 – 50,000 ft | 2,500 ft | 10 |
+| 25,000 – 60,000 ft | 2,500 ft | 14 |
 
-49 bands × 360 bearings = 17,640 cells, most of them empty.
+53 bands × 360 bearings = 19,080 cells, most of them empty. The top reaches 60,000 ft
+for the U-2 and Global Hawk; a report of exactly 60,000 ft counts in the top band.
+Bands were added above 50,000 ft after release; an older state file is upgraded in
+place on first load, since bands on top leave every existing band number unchanged,
+and the original is kept beside it.
 
 ### 2.3 Altitude source
 
@@ -77,7 +81,7 @@ One bad position decode would otherwise inflate an all-time cell permanently. In
 - `type` must be `adsb_icao`, `adsb_icao_nt` or `adsb_other`. MLAT, Mode S and TIS-B
   positions are estimates, not receptions, and are dropped.
 - `lat`/`lon` present; `nic >= 7`; `rc <= 1852` m when present.
-- Range ≤ 350 NM, altitude ≤ 52,000 ft.
+- Range ≤ 350 NM, altitude ≤ 60,000 ft.
 - Each position is counted once. Fix time is `now - seen_pos` from the feed; a hex is
   only accepted when its fix time advances, so a 1 Hz poll of a stale record does not
   inflate the hit count.
@@ -134,6 +138,37 @@ Keeping `rec` means any point on the rendered surface can name the aircraft that
 it, with a timestamp and signal level. The data stays auditable, which matters when a
 cell looks too good to be true. Worst case the file is about 2 MB; in practice far less,
 and it gzips well.
+
+### 4.1 Heatmap
+
+A second accumulator beside the envelope: where traffic flies, not how far it is
+heard. A square grid of 2 NM cells reaching 350 NM from the receiver in each
+direction, in ten coarse altitude bands up to 60,000 ft.
+
+A count is a **pass**: one aircraft going through one cell. An aircraft adds one to
+each cell it is heard in, and adds to the same cell again only after 30 minutes away
+from it, so a holding pattern or a hovering helicopter counts once rather than once
+a lap or once a second. Counting positions instead, as the first version did, made
+slow and circling aircraft outweigh airliners many times over, and made routes at
+the edge of coverage, heard every few seconds rather than every second, look far
+quieter than they are.
+
+The window is the last **26 weeks**, kept as one file per week (Monday to Sunday,
+UTC) in `heatmap-weeks/YYYY-MM-DD.bin`, named for the Monday and holding only the
+cells that week touched. The collector keeps the window's total in memory: the
+current week adds to it, and a week falling out of the window is subtracted and its
+file deleted, so the window steps forward a week at a time and spans 25 to 26 weeks.
+Every five minutes it writes the current week and the total.
+
+The total is what the viewer reads, as `heatmap.json` (grid, window, number of
+passes) and `heatmap.bin`. Both day files and `heatmap.bin` are sparse: little-endian
+uint32 `(cell, count)` pairs, with cell = `(band × size + y) × size + x`, y north up
+and x east right. Most of the grid is empty, so the file is about a tenth of the
+dense grid it describes.
+
+A heatmap from the first version (dense uint16, counting positions) cannot be
+converted, since its counts measure time rather than flights. The collector moves it
+aside as `heatmap-v1.json`/`.bin` and starts a new one. The viewer reads both.
 
 ## 5. Collector
 

@@ -48,9 +48,9 @@ const VOLUME_GAIN = 1.35;
 /** The tubes' overall opacity, so the map and the aircraft still show through. */
 const VOLUME_OPACITY = 0.85;
 
-/** The colour ramp is looked up from a strip this many texels long, 0 to 50,000 ft. */
+/** The colour ramp is looked up from a strip this many texels long, 0 to 60,000 ft. */
 const RAMP_TEXELS = 256;
-const RAMP_TOP_FT = 50000;
+const RAMP_TOP_FT = 60000;
 
 const FLAT_COLOR = new THREE.Color(0xe8e8e8);
 const littleEndian = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
@@ -60,7 +60,9 @@ export async function loadHeatmap(base) {
   const metaResp = await fetch(`${base}.json`, { cache: 'no-store' });
   if (!metaResp.ok) throw new Error(`HTTP ${metaResp.status} from ${base}.json`);
   const meta = await metaResp.json();
-  if (meta.version !== 1 || meta.dtype !== 'uint16' || meta.byteOrder !== 'little') {
+  const v1 = meta.version === 1 && meta.dtype === 'uint16';
+  const v2 = meta.version === 2 && meta.dtype === 'uint32';
+  if (!(v1 || v2) || meta.byteOrder !== 'little') {
     throw new Error('heatmap format not recognised');
   }
   const binResp = await fetch(`${base}.bin`, { cache: 'no-store' });
@@ -69,6 +71,7 @@ export async function loadHeatmap(base) {
 
   const bands = meta.bandEdges.length - 1;
   const cells = meta.size * meta.size;
+  if (v2) return { meta, counts: unpackPairs(buffer, bands * cells), bands, cells };
   if (buffer.byteLength !== bands * cells * 2) {
     throw new Error(`heatmap.bin is ${buffer.byteLength} bytes, expected ${bands * cells * 2}`);
   }
@@ -82,6 +85,22 @@ export async function loadHeatmap(base) {
     for (let i = 0; i < counts.length; i++) counts[i] = view.getUint16(i * 2, true);
   }
   return { meta, counts, bands, cells };
+}
+
+/**
+ * The second format: passes rather than positions, and only the cells that have
+ * any, as little-endian uint32 (cell, count) pairs. Spread back out into the
+ * same dense band-by-band grid the first format arrives as.
+ */
+function unpackPairs(buffer, total) {
+  if (buffer.byteLength % 8 !== 0) throw new Error('heatmap.bin is not whole pairs');
+  const view = new DataView(buffer);
+  const counts = new Uint32Array(total);
+  for (let at = 0; at < buffer.byteLength; at += 8) {
+    const cell = view.getUint32(at, true);
+    if (cell < total) counts[cell] = view.getUint32(at + 4, true);
+  }
+  return counts;
 }
 
 /**
@@ -479,8 +498,12 @@ export function summarizeHeat(heat) {
       if (counts[b * cells + i]) { lit++; break; }
     }
   }
+  // The first format counted positions; the second counts passes.
+  const passes = heat.meta.counts === 'passes';
   return {
-    samples: heat.meta.samples || 0,
+    unit: passes ? 'passes' : 'positions',
+    count: (passes ? heat.meta.passes : heat.meta.samples) || 0,
+    windowWeeks: heat.meta.windowWeeks || null,
     lit,
     created: heat.meta.created,
     updated: heat.meta.updated,

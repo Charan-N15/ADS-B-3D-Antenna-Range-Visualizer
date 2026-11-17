@@ -11,7 +11,7 @@
 // the theoretical floor. Keeping the axes straight makes the chart readable.
 
 import { horizonFloorFt } from './geo.js';
-import { rangeAt } from './envelope.js';
+import { rangeAt, topAltitudeFt } from './envelope.js';
 import { altitudeCss } from './altitude.js';
 
 const PAD = { left: 52, right: 12, top: 14, bottom: 30 };
@@ -29,12 +29,25 @@ const STYLE = {
   aircraft: '#e8e8e8',
 };
 
+/**
+ * The slice is drawn to 45,000 ft, where nearly everything flies, and only made
+ * taller when something has actually been seen higher, so the usual picture keeps
+ * its full height. Rounded up to the next 5,000 ft.
+ */
+const SLICE_MIN_TOP_FT = 45000;
+
+function sliceTopFt(model, contacts) {
+  let top = Math.min(topAltitudeFt(model), model.edges[model.nBands]);
+  for (const c of contacts || []) top = Math.max(top, c.altFt);
+  return Math.max(SLICE_MIN_TOP_FT, Math.ceil(top / 5000) * 5000);
+}
+
 export class SliceView {
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.maxRangeNm = 160;
-    this.maxAltFt = 45000;
+    this.maxAltFt = SLICE_MIN_TOP_FT;
   }
 
   resize() {
@@ -70,6 +83,7 @@ export class SliceView {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.w, this.h);
     if (!model) return;
+    this.maxAltFt = sliceTopFt(model, contacts);
 
     const x0 = this.xOf(0), x1 = this.xOf(this.maxRangeNm);
     const yTop = this.yOf(this.maxAltFt), yBottom = this.yOf(0);

@@ -41,6 +41,9 @@ const MAP_OPACITY = 1;
 const AIRCRAFT_REFRESH_MS = 1000;
 const CONTOUR_ALTITUDES = [2000, 5000, 10000, 20000, 30000, 40000];
 
+/** The highest altitude the collector keeps, and so the top of the filter. */
+const ALT_TOP_FT = 60000;
+
 const el = (id) => document.getElementById(id);
 
 const DEFAULT_UI = {
@@ -54,7 +57,7 @@ const DEFAULT_UI = {
   heatBusiestPct: 30,
   extendHorizon: false,
   altMinFt: 0,
-  altMaxFt: 50000,
+  altMaxFt: ALT_TOP_FT,
   exag: 8,
   curvature: true,
   colorByAlt: true,
@@ -89,6 +92,10 @@ if (savedSettings && savedSettings.layers
 // with it on and the horizon off would come back with curvature switched off
 // and nothing on screen saying why.
 if (!ui.layers.horizon) ui.extendHorizon = false;
+
+// The filter topped out at 50,000 ft before the bands went higher, so a view saved
+// then with it wide open would now hide everything above 50,000.
+if (savedSettings && savedSettings.altMaxFt === 50000) ui.altMaxFt = ALT_TOP_FT;
 
 let doc = null;        // raw envelope state
 let model = null;      // gridded form
@@ -150,7 +157,7 @@ function viewOpts() {
 
 /** True when the altitude filter is showing everything. */
 function altFilterIsOpen() {
-  return ui.altMinFt <= 0 && ui.altMaxFt >= 50000;
+  return ui.altMinFt <= 0 && ui.altMaxFt >= ALT_TOP_FT;
 }
 
 /** Live traffic inside the altitude window. */
@@ -527,9 +534,12 @@ function renderHeatStats() {
   const s = summarizeHeat(heat);
   const days = Math.max(0, (s.updated - s.created) / 86400);
   el('heatGroup').hidden = false;
-  el('heatSince').textContent = `Collected over ${days.toFixed(1)} days`;
+  // Once the window is full it slides, and "collected over" stops growing.
+  el('heatSince').textContent = s.windowWeeks && days >= (s.windowWeeks - 1) * 7
+    ? `The last ${s.windowWeeks} weeks`
+    : `Collected over ${days.toFixed(1)} days`;
   defList(el('heatStats'), [
-    ['positions', s.samples.toLocaleString()],
+    [s.unit, s.count.toLocaleString()],
     ['cells', `${s.lit.toLocaleString()} / ${heat.cells.toLocaleString()}`],
     ['updated', fmtTime(s.updated)],
   ]);
@@ -923,11 +933,11 @@ function wireUi() {
     let lo = Number(el('altMin').value);
     let hi = Number(el('altMax').value);
     if (!Number.isFinite(lo)) lo = 0;
-    if (!Number.isFinite(hi)) hi = 50000;
+    if (!Number.isFinite(hi)) hi = ALT_TOP_FT;
     // Crossed values would otherwise filter everything away and look like a bug.
     if (lo > hi) [lo, hi] = [hi, lo];
-    ui.altMinFt = Math.max(0, Math.min(50000, lo));
-    ui.altMaxFt = Math.max(0, Math.min(50000, hi));
+    ui.altMinFt = Math.max(0, Math.min(ALT_TOP_FT, lo));
+    ui.altMaxFt = Math.max(0, Math.min(ALT_TOP_FT, hi));
     el('altMin').value = String(ui.altMinFt);
     el('altMax').value = String(ui.altMaxFt);
     onViewOptionChange();
@@ -937,7 +947,7 @@ function wireUi() {
   el('altMax').addEventListener('change', applyAltFilter);
   el('altReset').addEventListener('click', () => {
     el('altMin').value = '0';
-    el('altMax').value = '50000';
+    el('altMax').value = String(ALT_TOP_FT);
     applyAltFilter();
   });
 
