@@ -51,7 +51,7 @@ const DEFAULT_UI = {
   layers: {
     envelope: true, contours: true, horizon: false, ground: true,
     basemap: true, footprint: true, aircraft3d: true,
-    heat: false, labels: false, trails: true,
+    heat: false, labels: false, trails: false,
   },
   labelFields: { ...DEFAULT_LABEL_FIELDS },
   heatBusiestPct: 30,
