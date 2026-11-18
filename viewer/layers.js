@@ -394,7 +394,7 @@ const GRAVITY = 9.81;
  * exaggerated like the climb, since bank is a roll about the aircraft's own nose
  * and the scene does not stretch it. Positive is right wing down.
  */
-function bankAngle(c) {
+export function bankAngle(c) {
   if (UNPITCHED.has(c.shape) || !Number.isFinite(c.turnRate) || !(c.gs > 0)) return 0;
   if (Math.abs(c.turnRate) < LEVEL_TURN_DEG_S) return 0;
   const bank = Math.atan((c.gs * KT_TO_MS * c.turnRate * Math.PI / 180) / GRAVITY);
@@ -561,81 +561,188 @@ export class AircraftLayer {
 /**
  * Trails share the altitude colours with the envelope and its rings, so on their
  * own they sink into them. Lifted this far toward white they read as a separate,
- * lighter line on the same colour.
+ * lighter ribbon on the same colour.
  */
 const TRAIL_LIGHTEN = 0.45;
 const _white = new THREE.Color(0xffffff);
 
+/** How opaque a trail is right behind the aircraft. It fades to nothing at the tail. */
+const TRAIL_OPACITY = 0.4;
+
+/** A trail's width on screen, as a share of the aircraft's length: about its wingspan. */
+const TRAIL_WIDTH = 0.8;
+
+const RIBBON_VERTEX = /* glsl */ `
+  attribute vec3 side;
+  attribute float edge;
+  attribute vec3 tint;
+  attribute float alpha;
+  uniform float uHalfPx;
+  uniform float uWorldPerPx;
+  varying vec3 vTint;
+  varying float vAlpha;
+  void main() {
+    // The same width on screen however far away the trail is, as the
+    // aircraft are: its world width grows with distance from the camera.
+    float depth = -(modelViewMatrix * vec4(position, 1.0)).z;
+    vec3 p = position + side * edge * uHalfPx * uWorldPerPx * depth;
+    vTint = tint;
+    vAlpha = alpha;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+  }
+`;
+
+const RIBBON_FRAGMENT = /* glsl */ `
+  varying vec3 vTint;
+  varying float vAlpha;
+  void main() {
+    gl_FragColor = vec4(vTint, vAlpha);
+  }
+`;
+
+const _a = new THREE.Vector3();
+const _b = new THREE.Vector3();
+const _t = new THREE.Vector3();
+const _s = new THREE.Vector3();
+const _u = new THREE.Vector3();
+const _z = new THREE.Vector3(0, 0, 1);
+
 /**
- * Where each aircraft has been, as one line per aircraft through every position
- * heard since it appeared. All of them share one set of line segments, so a sky
- * full of trails is still a single draw. Positions are kept as bearing, range and
- * altitude and projected here, so a change of exaggeration or curvature bends
- * the trails along with everything else.
+ * Where each aircraft has been, as a flat ribbon behind it through every
+ * position heard since it appeared. The ribbon lies level, and rolls with the
+ * aircraft where it was banking, so turns twist it the way the aircraft went
+ * through them. It is widest and most solid at the aircraft and fades out
+ * toward the oldest end.
+ *
+ * Every trail shares one mesh, so a sky full of them is still a single draw.
+ * Positions are kept as bearing, range and altitude and projected here, so a
+ * change of exaggeration or curvature bends the trails with everything else.
+ * The width is applied on the GPU, so zooming costs nothing.
  */
 export class TrailLayer {
   constructor() {
     this.capacity = 0;
     this.geometry = new THREE.BufferGeometry();
-    // Drawn after the envelope and the heat and without depth, so a trail behind
-    // the envelope's wall still shows through it, as the aircraft do.
-    this.lines = new THREE.LineSegments(this.geometry, new THREE.LineBasicMaterial({
-      vertexColors: true, transparent: true, depthTest: false, depthWrite: false,
-    }));
-    this.lines.renderOrder = 9;
-    this.lines.name = 'trails';
+    this.material = new THREE.ShaderMaterial({
+      vertexShader: RIBBON_VERTEX,
+      fragmentShader: RIBBON_FRAGMENT,
+      uniforms: { uHalfPx: { value: 1 }, uWorldPerPx: { value: 0 } },
+      // Drawn after the envelope and the heat and without depth, so a trail
+      // behind the envelope's wall still shows through it, as the aircraft do.
+      transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide,
+    });
+    this.mesh = new THREE.Mesh(this.geometry, this.material);
+    this.mesh.renderOrder = 9;
+    this.mesh.name = 'trails';
     // The geometry changes every second; working out its bounds for culling
     // would cost more than drawing it.
-    this.lines.frustumCulled = false;
-    this.group = this.lines;
+    this.mesh.frustumCulled = false;
+    this.group = this.mesh;
   }
 
   setVisibility(show) {
-    this.lines.visible = show;
+    this.mesh.visible = show;
   }
 
-  grow(segments) {
-    if (segments <= this.capacity) return;
-    this.capacity = Math.max(1024, Math.ceil(segments * 1.5));
-    this.positions = new Float32Array(this.capacity * 6);
-    this.colors = new Float32Array(this.capacity * 6);
-    this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
-    this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
+  /** Keeps the ribbon's on-screen width in step with the camera. Every frame. */
+  fitToView(camera, heightPx, planeScale) {
+    this.material.uniforms.uWorldPerPx.value =
+      2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) / Math.max(1, heightPx);
+    this.material.uniforms.uHalfPx.value = PLANE_PX * planeScale * TRAIL_WIDTH / 2;
   }
 
-  /** trails: one array of {az, rangeNm, altFt} per aircraft, oldest first. */
+  grow(points) {
+    if (points <= this.capacity) return;
+    this.capacity = Math.max(1024, Math.ceil(points * 1.5));
+    const n = this.capacity * 2;   // two vertices, one each side, per point
+    this.attrs = {
+      position: new THREE.BufferAttribute(new Float32Array(n * 3), 3),
+      side: new THREE.BufferAttribute(new Float32Array(n * 3), 3),
+      edge: new THREE.BufferAttribute(new Float32Array(n), 1),
+      tint: new THREE.BufferAttribute(new Float32Array(n * 3), 3),
+      alpha: new THREE.BufferAttribute(new Float32Array(n), 1),
+    };
+    for (const [name, attr] of Object.entries(this.attrs)) this.geometry.setAttribute(name, attr);
+    this.index = new THREE.BufferAttribute(new Uint32Array(this.capacity * 6), 1);
+    this.geometry.setIndex(this.index);
+  }
+
+  /**
+   * trails: one array per aircraft, oldest first, of {t, az, rangeNm, altFt,
+   * bank}, the last being the aircraft where it is now. bank is radians, right
+   * wing down positive.
+   */
   update(trails, opts) {
-    let segments = 0;
-    for (const points of trails) segments += Math.max(0, points.length - 1);
-    this.grow(segments);
+    let total = 0;
+    for (const points of trails) if (points.length > 1) total += points.length;
+    this.grow(total);
     const byAlt = Boolean(opts.colorByAlt);
     const flat = FLAT_COLOR.clone();
+    const rgb = { r: 0, g: 0, b: 0 };
     const tint = new THREE.Color();
+    const pos = this.attrs ? this.attrs.position.array : null;
+    const side = this.attrs ? this.attrs.side.array : null;
+    const edge = this.attrs ? this.attrs.edge.array : null;
+    const tints = this.attrs ? this.attrs.tint.array : null;
+    const alpha = this.attrs ? this.attrs.alpha.array : null;
+    const index = this.index ? this.index.array : null;
 
     let v = 0;
-    const put = (p) => {
-      const [x, y, z] = project(p.az, p.rangeNm, p.altFt, opts);
-      this.positions[v * 3] = x;
-      this.positions[v * 3 + 1] = y;
-      this.positions[v * 3 + 2] = z;
-      const c = byAlt
-        ? tint.copy(altitudeThreeColor(Math.round(p.altFt / 100) * 100)).lerp(_white, TRAIL_LIGHTEN)
-        : flat;
-      this.colors[v * 3] = c.r;
-      this.colors[v * 3 + 1] = c.g;
-      this.colors[v * 3 + 2] = c.b;
-      v++;
-    };
+    let k = 0;
     for (const points of trails) {
-      for (let i = 1; i < points.length; i++) {
-        put(points[i - 1]);
-        put(points[i]);
+      const n = points.length;
+      if (n < 2) continue;
+      const centres = points.map((p) => project(p.az, p.rangeNm, p.altFt, opts));
+      const t0 = points[0].t;
+      const span = Math.max(1e-6, points[n - 1].t - t0);
+      _s.set(1, 0, 0);
+      for (let i = 0; i < n; i++) {
+        const p = points[i];
+        // Along the path here, from the neighbours either side.
+        _a.fromArray(centres[Math.max(0, i - 1)]);
+        _b.fromArray(centres[Math.min(n - 1, i + 1)]);
+        _t.subVectors(_b, _a);
+        _t.z = 0;
+        // Level and square to the path; a point that has not moved keeps the
+        // last direction rather than turning the ribbon edge on.
+        if (_t.lengthSq() > 1e-12) _s.crossVectors(_t.normalize(), _z).normalize();
+        // Rolled by the bank: the right edge (+side) goes down in a right turn.
+        _u.crossVectors(_s, _t);
+        const bank = Number.isFinite(p.bank) ? p.bank : 0;
+        const sx = _s.x * Math.cos(bank) - _u.x * Math.sin(bank);
+        const sy = _s.y * Math.cos(bank) - _u.y * Math.sin(bank);
+        const sz = _s.z * Math.cos(bank) - _u.z * Math.sin(bank);
+
+        const c = byAlt
+          ? tint.copy(altitudeThreeColor(Math.round(p.altFt / 100) * 100)).lerp(_white, TRAIL_LIGHTEN)
+          : flat;
+        c.getRGB(rgb, THREE.SRGBColorSpace);
+        // Solid at the aircraft, gone at the tail.
+        const a = TRAIL_OPACITY * ((p.t - t0) / span);
+
+        for (const e of [-1, 1]) {
+          pos.set(centres[i], v * 3);
+          side[v * 3] = sx;
+          side[v * 3 + 1] = sy;
+          side[v * 3 + 2] = sz;
+          edge[v] = e;
+          tints[v * 3] = rgb.r;
+          tints[v * 3 + 1] = rgb.g;
+          tints[v * 3 + 2] = rgb.b;
+          alpha[v] = a;
+          v++;
+        }
+        if (i > 0) {
+          const l0 = v - 4, r0 = v - 3, l1 = v - 2, r1 = v - 1;
+          index[k++] = l0; index[k++] = r0; index[k++] = l1;
+          index[k++] = r0; index[k++] = r1; index[k++] = l1;
+        }
       }
     }
-    this.geometry.setDrawRange(0, v);
-    if (this.capacity) {
-      this.geometry.attributes.position.needsUpdate = true;
-      this.geometry.attributes.color.needsUpdate = true;
+    this.geometry.setDrawRange(0, k);
+    if (this.attrs) {
+      for (const attr of Object.values(this.attrs)) attr.needsUpdate = true;
+      this.index.needsUpdate = true;
     }
   }
 }

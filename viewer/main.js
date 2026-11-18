@@ -7,7 +7,7 @@ import {
 } from './envelope.js';
 import {
   buildGround, buildEnvelopeSurface, buildContourRings, buildHorizonSurface,
-  buildCellHighlight, AircraftLayer, TrailLayer,
+  buildCellHighlight, AircraftLayer, TrailLayer, bankAngle,
 } from './layers.js';
 import { loadBasemap, buildBasemapDisc } from './basemap.js';
 import { altitudeCss, LEGEND_ALTITUDES } from './altitude.js';
@@ -234,7 +234,8 @@ function updateTraffic() {
   aircraftLayer.setContacts(shown);
   aircraftLayer.update(opts);
   // Each trail ends at the aircraft itself, not at the last point kept.
-  trailLayer.update(shown.map((c) => [...(trails.get(c.hex) || []), c]), opts);
+  trailLayer.update(shown.map((c) => [...(trails.get(c.hex) || []),
+    { t: trafficNow, az: c.az, rangeNm: c.rangeNm, altFt: c.altFt, bank: bankAngle(c) }]), opts);
 }
 
 function applyLayerVisibility() {
@@ -411,7 +412,8 @@ const TRAIL_STEP_S = 30;
 /** How far back a trail reaches, in seconds. Infinity keeps all of it. */
 const TRAIL_MAX_AGE_S = Infinity;
 
-const trails = new Map();   // hex -> [{ t, az, rangeNm, altFt }], oldest first
+const trails = new Map();   // hex -> [{ t, az, rangeNm, altFt, bank }], oldest first
+let trafficNow = 0;         // the feed's own clock at the last poll, seconds
 
 function polarXY(p) {
   const a = p.az * Math.PI / 180;
@@ -437,7 +439,9 @@ function recordTrails(now, list) {
         || Math.abs(c.altFt - last.altFt) >= TRAIL_STEP_FT
         || now - last.t >= TRAIL_STEP_S;
     }
-    if (keep) trail.push({ t: now, az: c.az, rangeNm: c.rangeNm, altFt: c.altFt });
+    if (keep) {
+      trail.push({ t: now, az: c.az, rangeNm: c.rangeNm, altFt: c.altFt, bank: bankAngle(c) });
+    }
     while (trail.length && trail[0].t < now - TRAIL_MAX_AGE_S) trail.shift();
   }
   for (const hex of trails.keys()) {
@@ -484,6 +488,7 @@ async function refreshAircraft() {
     for (const [hex, history] of trackHistory) {
       if (history[history.length - 1].t < snapshot.now - 60) trackHistory.delete(hex);
     }
+    trafficNow = snapshot.now;
     recordTrails(snapshot.now, out);
     updateTraffic();
     // One dropped poll should not leave an error up once traffic is flowing again.
@@ -703,6 +708,7 @@ function animate() {
   if (ui.view === 'slice') return;
   controls.update();
   aircraftLayer.fitToView(camera, sceneCanvas.clientHeight);
+  trailLayer.fitToView(camera, sceneCanvas.clientHeight, ui.planeScale);
   renderer.render(scene, camera);
   const showLabels = ui.layers.labels && ui.layers.aircraft3d;
   labelLayer.draw(showLabels ? aircraftLayer : null, camera, ui.labelFields,
