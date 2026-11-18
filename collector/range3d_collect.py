@@ -10,10 +10,12 @@ Standard library only. Python 3.9+.
 
 import argparse
 import array
+import calendar
 import gzip
 import json
 import math
 import os
+import shutil
 import signal
 import sys
 import time
@@ -32,7 +34,12 @@ LOS_K_NM_PER_SQRT_FT = 1.23
 ACCEPTED_TYPES = ("adsb_icao", "adsb_icao_nt", "adsb_other")
 
 MAX_RANGE_NM = 350.0
-MAX_ALT_FT = 52000
+
+# The top of every altitude band, envelope and heatmap alike. High enough for the
+# business jets that cruise up to 51,000 ft, with a little room over; a report of
+# exactly the top still counts, in the highest band.
+ALT_TOP_FT = 53000
+MAX_ALT_FT = ALT_TOP_FT
 MIN_NIC = 7
 MAX_RC_M = 1852
 
@@ -46,12 +53,58 @@ def build_band_edges():
         while alt < hi:
             edges.append(alt)
             alt += step
-    edges.append(50000)
+    # One last band above 50,000 ft, up to the top.
+    edges += [50000, ALT_TOP_FT]
     return edges
+
+
+def extends(old, new):
+    """True when `new` is `old` with bands added on top and nothing else changed.
+
+    Cells are keyed by band number counted from the ground up, so bands added
+    above the old top leave every existing number, and so every count and
+    record, meaning exactly what it did. Anything else would reinterpret them.
+    """
+    return (isinstance(old, list) and 2 <= len(old) < len(new)
+            and new[:len(old)] == old)
+
+
+def from_60k(path, doc):
+    """Brings a state file from the 60,000 ft build down to this one's bands.
+
+    The band from 50,000 ft keeps its number and now reaches 53,000 ft; the
+    bands above it are dropped, with any cells in them. The file as it was is
+    kept beside it.
+    """
+    top = N_BANDS - 1
+    dropped = [key for key in doc.get("cells", {}) if int(key.split(",")[1]) > top]
+    for key in dropped:
+        del doc["cells"][key]
+    doc["bandEdges"] = BAND_EDGES
+    backup = path + ".before-53000ft"
+    if not os.path.exists(backup):
+        shutil.copy2(path, backup)
+    print("%s: bands brought down from 60,000 to %s ft, %d cells above that "
+          "dropped; the old file is kept as %s"
+          % (path, f"{ALT_TOP_FT:,}", len(dropped), backup), flush=True)
+
+
+def back_up(path, old_top_ft):
+    """Keeps a copy of a file as it was before its bands were extended."""
+    backup = "%s.before-%dft" % (path, ALT_TOP_FT)
+    if not os.path.exists(backup):
+        shutil.copy2(path, backup)
+    print("%s: bands extended from %d to %d ft; the old file is kept as %s"
+          % (path, old_top_ft, ALT_TOP_FT, backup), flush=True)
 
 
 BAND_EDGES = build_band_edges()
 N_BANDS = len(BAND_EDGES) - 1
+
+# A development build briefly took the bands to 60,000 ft in 2,500 ft steps. Its
+# bands up to 50,000 ft are these ones, so its files are brought back down by
+# dropping whatever sits above the new top band.
+EDGES_60K = BAND_EDGES[:-1] + [52500, 55000, 57500, 60000]
 
 
 # --------------------------------------------------------------------- heatmap
@@ -67,16 +120,34 @@ N_BANDS = len(BAND_EDGES) - 1
 # Coarse altitude bands. The envelope's 49 are for measuring a boundary precisely;
 # eight is plenty for showing where traffic sits, and keeps the grid 6x smaller.
 
-HEAT_BAND_EDGES = [0, 2000, 5000, 10000, 15000, 20000, 30000, 40000, 50000]
+HEAT_BAND_EDGES = [0, 2000, 5000, 10000, 15000, 20000, 30000, 40000, 50000, ALT_TOP_FT]
+
+# The 60,000 ft development build had the same bands with a higher top; its top
+# band becomes 50,000 to 53,000 ft as it stands.
+HEAT_EDGES_60K = HEAT_BAND_EDGES[:-1] + [60000]
 HEAT_N_BANDS = len(HEAT_BAND_EDGES) - 1
 HEAT_CELL_NM = 2.0
-HEAT_HALF_NM = 300.0
-HEAT_SIZE = int(2 * HEAT_HALF_NM / HEAT_CELL_NM)    # 300 x 300 cells per band
-HEAT_MAX_COUNT = 65535                              # uint16 saturates here
+HEAT_HALF_NM = MAX_RANGE_NM                         # the grid reaches as far as we accept
+HEAT_SIZE = int(2 * HEAT_HALF_NM / HEAT_CELL_NM)    # 350 x 350 cells per band
+HEAT_CELLS = HEAT_N_BANDS * HEAT_SIZE * HEAT_SIZE
+HEAT_VERSION = 2
+
+# Six months, as a rolling window of whole weeks: patterns change with the seasons
+# and with runway use, and an all-time total would never let the old ones fade.
+# Weeks rather than days keep it to 26 files; the window steps forward a week at
+# a time, so it spans between 25 and 26 weeks.
+HEAT_WINDOW_WEEKS = 26
+
+# An aircraft back in a cell it was in less than this long ago is still on the
+# same pass. Long enough that a holding pattern or circuit counts once, not once
+# a lap; short enough that nothing scheduled comes back through that quickly.
+HEAT_PASS_GAP_S = 1800
 
 
 def heat_band_of(alt_ft):
     """Index of the coarse heatmap altitude band, or None if out of range."""
+    if alt_ft == HEAT_BAND_EDGES[-1]:
+        return HEAT_N_BANDS - 1
     if alt_ft < HEAT_BAND_EDGES[0] or alt_ft >= HEAT_BAND_EDGES[-1]:
         return None
     for i in range(HEAT_N_BANDS - 1, -1, -1):
@@ -87,6 +158,8 @@ def heat_band_of(alt_ft):
 
 def band_of(alt_ft):
     """Index of the altitude band containing alt_ft, or None if out of range."""
+    if alt_ft == BAND_EDGES[-1]:
+        return N_BANDS - 1
     if alt_ft < BAND_EDGES[0] or alt_ft >= BAND_EDGES[-1]:
         return None
     lo, hi = 0, N_BANDS
@@ -154,10 +227,18 @@ class Envelope:
         if doc.get("version") != STATE_VERSION:
             raise SystemExit("state file version %r is not %d; refusing to touch it"
                              % (doc.get("version"), STATE_VERSION))
-        if doc.get("bandEdges") != BAND_EDGES:
-            raise SystemExit(
-                "state file band edges differ from this build's. Migrate or start "
-                "a new file; silently rebinning would corrupt the record.")
+        old_edges = doc.get("bandEdges")
+        if old_edges == EDGES_60K:
+            from_60k(path, doc)
+            old_edges = BAND_EDGES
+        if old_edges != BAND_EDGES:
+            if not extends(old_edges, BAND_EDGES):
+                raise SystemExit(
+                    "state file band edges differ from this build's. Migrate or start "
+                    "a new file; silently rebinning would corrupt the record.")
+            # Only bands on top are new, so the cells carry over as they are and
+            # the next save writes the new edges.
+            back_up(path, old_edges[-1])
         env = cls()
         env.rx = doc.get("rx", {"lat": None, "lon": None, "altFt": None})
         env.created = doc.get("created", env.created)
@@ -235,77 +316,185 @@ class Envelope:
 
 
 class Heatmap:
-    """Dense position-count grid: eight altitude bands of HEAT_SIZE^2 cells.
+    """Flights through each cell of the grid over the last six months.
 
-    Stored as two files beside the envelope — a small JSON header and a raw
-    little-endian uint16 array — because a sparse JSON dict of this many cells
-    would be larger than the binary and far slower to parse in a browser. The
-    grid is mostly zeros, so it compresses to a fraction of its size in transit.
+    A count is one aircraft passing through a cell, not one position report. An
+    aircraft adds one to every cell it is heard in, and adds to the same cell
+    again only after HEAT_PASS_GAP_S away from it. Counting time instead would
+    weigh a hovering helicopter like forty airliners, and would make routes at
+    the edge of coverage, where a position is heard every ten seconds rather
+    than every second, look far quieter than they are.
+
+    Kept as one small file per week (Monday to Sunday, UTC) under <base>-weeks/,
+    named for the Monday, each holding only the cells that week touched, as
+    little-endian uint32 (cell, count) pairs. The six-month total is their sum,
+    kept in memory as it runs: this week's passes add to it, and a week falling
+    out of the window is subtracted and its file deleted. What the viewer reads is that total, written beside the envelope as
+    heatmap.json and heatmap.bin in the same sparse pairs, since most of the
+    grid is empty and a sparse file is a fraction of the size to write and send.
     """
 
-    def __init__(self, rx_lat=None, rx_lon=None):
-        now = int(time.time())
+    def __init__(self, base, rx_lat=None, rx_lon=None):
+        self.base = base
+        self.weeks_dir = base + "-weeks"
         self.rx = {"lat": rx_lat, "lon": rx_lon}
-        self.created = now
-        self.updated = now
-        self.samples = 0
-        self.cells = array.array("H", bytes(2 * HEAT_N_BANDS * HEAT_SIZE * HEAT_SIZE))
-        if self.cells.itemsize != 2:
-            raise SystemExit("this platform's array('H') is not 2 bytes wide")
+        self.updated = int(time.time())
+        self.totals = array.array("I", bytes(4 * HEAT_CELLS))
+        if self.totals.itemsize != 4:
+            raise SystemExit("this platform's array('I') is not 4 bytes wide")
+        self.passes = 0               # in the window
+        self.weeks = []               # weeks on disk, oldest first, by Monday's date
+        self.week = None              # the week being counted
+        self.week_counts = {}         # cell -> passes, this week
+        self.recent = {}              # hex -> {cell: last time heard in it}
+
+    # ------------------------------------------------------------ files
 
     @staticmethod
     def paths(base):
         return base + ".json", base + ".bin"
 
-    def meta(self):
-        return {
-            "version": 1,
-            "rx": self.rx,
-            "bandEdges": HEAT_BAND_EDGES,
-            "cellNm": HEAT_CELL_NM,
-            "halfNm": HEAT_HALF_NM,
-            "size": HEAT_SIZE,
-            "dtype": "uint16",
-            "byteOrder": "little",
-            "layout": "band, y (north up), x (east right)",
-            "created": self.created,
-            "updated": self.updated,
-            "samples": self.samples,
-        }
+    def week_path(self, week):
+        return os.path.join(self.weeks_dir, week + ".bin")
+
+    @staticmethod
+    def week_of(t):
+        """The week holding time t, named by the date of its Monday, UTC."""
+        monday = t - time.gmtime(t).tm_wday * 86400
+        return time.strftime("%Y-%m-%d", time.gmtime(monday))
+
+    @staticmethod
+    def week_start(week):
+        return calendar.timegm(time.strptime(week, "%Y-%m-%d"))
+
+    @staticmethod
+    def read_pairs(path):
+        pairs = array.array("I")
+        with open(path, "rb") as fh:
+            pairs.frombytes(fh.read())
+        if sys.byteorder != "little":
+            pairs.byteswap()
+        return pairs
+
+    @staticmethod
+    def write_pairs(path, counts):
+        """counts: iterable of (cell, count). Atomic, like every other write here."""
+        pairs = array.array("I")
+        for cell, count in counts:
+            pairs.append(cell)
+            pairs.append(count)
+        if sys.byteorder != "little":
+            pairs.byteswap()
+        tmp = path + ".tmp"
+        with open(tmp, "wb") as fh:
+            fh.write(pairs.tobytes())
+        os.replace(tmp, path)
+
+    def grid(self):
+        return {"bandEdges": HEAT_BAND_EDGES, "cellNm": HEAT_CELL_NM,
+                "halfNm": HEAT_HALF_NM, "size": HEAT_SIZE}
+
+    def set_aside_v1(self):
+        """The first heatmap counted seconds, not passes, so its numbers cannot be
+        carried into this one. Kept beside it under a new name, never deleted."""
+        meta_path, bin_path = self.paths(self.base)
+        if not os.path.exists(meta_path):
+            return
+        try:
+            with open(meta_path, "r", encoding="utf-8") as fh:
+                version = json.load(fh).get("version")
+        except (OSError, ValueError):
+            version = None
+        if version == HEAT_VERSION:
+            return
+        for path in (meta_path, bin_path):
+            if os.path.exists(path):
+                root, ext = os.path.splitext(path)
+                os.replace(path, "%s-v1%s" % (root, ext))
+        print("%s: the old heatmap counted time, not passes, and has been kept as "
+              "%s-v1.json/.bin; a new one starts now" % (meta_path, self.base),
+              flush=True)
 
     @classmethod
-    def load_or_new(cls, base, rx_lat=None, rx_lon=None):
-        meta_path, bin_path = cls.paths(base)
-        heat = cls(rx_lat, rx_lon)
-        if not (os.path.exists(meta_path) and os.path.exists(bin_path)):
-            return heat
-        with open(meta_path, "r", encoding="utf-8") as fh:
-            doc = json.load(fh)
-        # Changing the grid would silently reinterpret every existing count, so
-        # refuse rather than corrupt a record that cannot be regenerated.
-        if (doc.get("bandEdges") != HEAT_BAND_EDGES
-                or doc.get("size") != HEAT_SIZE
-                or doc.get("cellNm") != HEAT_CELL_NM):
-            raise SystemExit(
-                "%s was written with a different heatmap grid. Move it aside to "
-                "start a new one." % meta_path)
-        with open(bin_path, "rb") as fh:
-            raw = fh.read()
-        if len(raw) != len(heat.cells) * 2:
-            raise SystemExit("%s is %d bytes, expected %d"
-                             % (bin_path, len(raw), len(heat.cells) * 2))
-        heat.cells = array.array("H")
-        heat.cells.frombytes(raw)
-        if sys.byteorder != "little":
-            heat.cells.byteswap()
-        heat.created = doc.get("created", heat.created)
-        heat.samples = doc.get("samples", 0)
-        if heat.rx.get("lat") is None:
-            heat.rx = doc.get("rx", heat.rx)
+    def load_or_new(cls, base, rx_lat=None, rx_lon=None, now=None):
+        heat = cls(base, rx_lat, rx_lon)
+        heat.set_aside_v1()
+        os.makedirs(heat.weeks_dir, exist_ok=True)
+
+        # The weeks are only meaningful on the grid they were counted on.
+        grid_path = os.path.join(heat.weeks_dir, "grid.json")
+        if os.path.exists(grid_path):
+            with open(grid_path, "r", encoding="utf-8") as fh:
+                stored = json.load(fh)
+            if dict(stored, bandEdges=HEAT_BAND_EDGES) == heat.grid() \
+                    and stored.get("bandEdges") == HEAT_EDGES_60K:
+                with open(grid_path, "w", encoding="utf-8") as fh:
+                    json.dump(heat.grid(), fh)
+                print("%s: top band relabelled from 50,000-60,000 to 50,000-%s ft"
+                      % (heat.weeks_dir, f"{ALT_TOP_FT:,}"), flush=True)
+                stored = heat.grid()
+            if stored != heat.grid():
+                raise SystemExit(
+                    "%s holds weeks counted on a different grid. Move the "
+                    "folder aside to start a new heatmap." % heat.weeks_dir)
+        else:
+            with open(grid_path, "w", encoding="utf-8") as fh:
+                json.dump(heat.grid(), fh)
+
+        meta_path = heat.paths(base)[0]
+        if os.path.exists(meta_path):
+            with open(meta_path, "r", encoding="utf-8") as fh:
+                rx = json.load(fh).get("rx")
+            if heat.rx.get("lat") is None and rx:
+                heat.rx = rx
+
+        for name in sorted(os.listdir(heat.weeks_dir)):
+            if name.endswith(".bin") and len(name) == len("YYYY-MM-DD.bin"):
+                week = name[:-4]
+                pairs = cls.read_pairs(heat.week_path(week))
+                for k in range(0, len(pairs) - 1, 2):
+                    if pairs[k] < HEAT_CELLS:
+                        heat.totals[pairs[k]] += pairs[k + 1]
+                        heat.passes += pairs[k + 1]
+                heat.weeks.append(week)
+        heat.roll(now if now is not None else time.time())
         return heat
 
-    def record(self, az_deg, range_nm, alt_ft):
-        """Count one accepted position. Returns True if it landed on the grid."""
+    # ------------------------------------------------------------ counting
+
+    def roll(self, now):
+        """Moves on to a new week when Monday comes, and lets go of any week
+        that has fallen out of the window."""
+        week = self.week_of(now)
+        if week != self.week:
+            if self.week is not None:
+                self.write_pairs(self.week_path(self.week), sorted(self.week_counts.items()))
+            self.week = week
+            self.week_counts = {}
+            if week in self.weeks:
+                pairs = self.read_pairs(self.week_path(week))
+                for k in range(0, len(pairs) - 1, 2):
+                    self.week_counts[pairs[k]] = pairs[k + 1]
+            else:
+                self.weeks.append(week)
+                self.weeks.sort()
+
+        # The window is this week and the weeks before it, HEAT_WINDOW_WEEKS in all.
+        oldest = self.week_of(now - (HEAT_WINDOW_WEEKS - 1) * 7 * 86400)
+        while self.weeks and self.weeks[0] < oldest:
+            gone = self.weeks.pop(0)
+            path = self.week_path(gone)
+            if os.path.exists(path):
+                pairs = self.read_pairs(path)
+                for k in range(0, len(pairs) - 1, 2):
+                    if pairs[k] < HEAT_CELLS:
+                        self.totals[pairs[k]] -= min(self.totals[pairs[k]], pairs[k + 1])
+                        self.passes -= pairs[k + 1]
+                os.remove(path)
+
+    def record(self, hexid, az_deg, range_nm, alt_ft, t):
+        """Counts a pass if this aircraft has not been in this cell lately.
+        Returns True when it counted."""
         band = heat_band_of(alt_ft)
         if band is None:
             return False
@@ -314,35 +503,68 @@ class Heatmap:
         yi = int((range_nm * math.cos(a) + HEAT_HALF_NM) / HEAT_CELL_NM)
         if not (0 <= xi < HEAT_SIZE and 0 <= yi < HEAT_SIZE):
             return False
-        i = (band * HEAT_SIZE + yi) * HEAT_SIZE + xi
-        if self.cells[i] < HEAT_MAX_COUNT:
-            self.cells[i] += 1
-        self.samples += 1
+        cell = (band * HEAT_SIZE + yi) * HEAT_SIZE + xi
+        seen = self.recent.setdefault(hexid, {})
+        last = seen.get(cell)
+        seen[cell] = t
+        if last is not None and t - last < HEAT_PASS_GAP_S:
+            return False
+        self.week_counts[cell] = self.week_counts.get(cell, 0) + 1
+        self.totals[cell] += 1
+        self.passes += 1
         return True
 
-    def save(self, base):
-        """Atomic for both files; the header is written last so a reader never
-        sees a header that claims more than the array holds."""
-        meta_path, bin_path = self.paths(base)
+    def forget(self, now):
+        """Drops cells an aircraft left long enough ago to count again anyway."""
+        cutoff = now - HEAT_PASS_GAP_S
+        for hexid in list(self.recent):
+            cells = {c: t for c, t in self.recent[hexid].items() if t >= cutoff}
+            if cells:
+                self.recent[hexid] = cells
+            else:
+                del self.recent[hexid]
+
+    # ------------------------------------------------------------ output
+
+    def window_start(self):
+        return self.week_start(self.weeks[0]) if self.weeks else self.updated
+
+    def meta(self):
+        return {
+            "version": HEAT_VERSION,
+            "rx": self.rx,
+            "bandEdges": HEAT_BAND_EDGES,
+            "cellNm": HEAT_CELL_NM,
+            "halfNm": HEAT_HALF_NM,
+            "size": HEAT_SIZE,
+            "dtype": "uint32",
+            "byteOrder": "little",
+            "layout": "sparse (cell, count) pairs; cell = (band * size + y) * size + x,"
+                      " y north up, x east right",
+            "counts": "passes",
+            "windowWeeks": HEAT_WINDOW_WEEKS,
+            "weeks": len(self.weeks),
+            "created": self.window_start(),
+            "updated": self.updated,
+            "passes": self.passes,
+        }
+
+    def save(self):
+        """This week's file, then the total; the header last, so a reader never
+        sees a header newer than the counts it describes."""
         self.updated = int(time.time())
-        os.makedirs(os.path.dirname(os.path.abspath(base)), exist_ok=True)
-
-        payload = self.cells
-        if sys.byteorder != "little":
-            payload = array.array("H", self.cells)
-            payload.byteswap()
-        tmp_bin = bin_path + ".tmp"
-        with open(tmp_bin, "wb") as fh:
-            fh.write(payload.tobytes())
-        os.replace(tmp_bin, bin_path)
-
+        if self.week is not None:
+            self.write_pairs(self.week_path(self.week), sorted(self.week_counts.items()))
+        meta_path, bin_path = self.paths(self.base)
+        totals = self.totals
+        self.write_pairs(bin_path, ((i, v) for i, v in enumerate(totals) if v))
         tmp_meta = meta_path + ".tmp"
         with open(tmp_meta, "w", encoding="utf-8") as fh:
             json.dump(self.meta(), fh, separators=(",", ":"))
         os.replace(tmp_meta, meta_path)
 
     def filled(self):
-        return sum(1 for v in self.cells if v)
+        return sum(1 for v in self.totals if v)
 
 
 def accept(ac, now, last_fix, rx):
@@ -442,15 +664,14 @@ def cmd_collect(args):
     print("state %s: %d cells, %d samples"
           % (args.state, len(env.cells), env.samples), flush=True)
 
-    # The heatmap is written far less often than the envelope: it is a fixed
-    # 1.4 MB regardless of content, and rewriting that every minute is pointless
-    # churn on an SD card for a layer nobody watches second by second.
+    # The heatmap is written less often than the envelope: nobody watches it
+    # second by second, and every write is wear on an SD card.
     heat = None
     heat_base = heatmap_base(args)
     if heat_base:
         heat = Heatmap.load_or_new(heat_base, rx_lat, rx_lon)
-        print("heatmap %s.bin: %d cells filled, %d samples"
-              % (heat_base, heat.filled(), heat.samples), flush=True)
+        print("heatmap %s: %d weeks, %d cells, %d passes"
+              % (heat_base, len(heat.weeks), heat.filled(), heat.passes), flush=True)
 
     last_fix = {}
     stopping = {"now": False}
@@ -484,6 +705,8 @@ def cmd_collect(args):
             continue
 
         now = snapshot.get("now", time.time())
+        if heat is not None:
+            heat.roll(now)
         for ac in snapshot.get("aircraft", ()):
             accepted = accept(ac, now, last_fix, env.rx)
             if accepted is None:
@@ -495,7 +718,7 @@ def cmd_collect(args):
             if heat is not None:
                 # The exact bearing, not the 1-degree bin: the grid is Cartesian
                 # and rounding to a bin here would quantise paths into spokes.
-                heat.record(ac.get("r_dir", az_bin), range_nm, rec["alt"])
+                heat.record(rec["hex"], ac.get("r_dir", az_bin), range_nm, rec["alt"], fix_t)
 
         # Aircraft go away; their dedupe entries should not accumulate forever.
         if len(last_fix) > 4000:
@@ -509,10 +732,11 @@ def cmd_collect(args):
                   % (len(env.cells), env.samples, records), flush=True)
 
         if heat is not None and time.time() - last_heat_save >= args.heatmap_every:
-            heat.save(heat_base)
+            heat.forget(now)
+            heat.save()
             last_heat_save = time.time()
-            print("heatmap saved: %d cells filled, %d samples"
-                  % (heat.filled(), heat.samples), flush=True)
+            print("heatmap saved: %d weeks, %d passes" % (len(heat.weeks), heat.passes),
+                  flush=True)
 
         if deadline and time.time() >= deadline:
             break
@@ -523,10 +747,10 @@ def cmd_collect(args):
 
     env.save(args.state)
     if heat is not None:
-        heat.save(heat_base)
+        heat.save()
     print("stopped: %d cells, %d samples%s"
           % (len(env.cells), env.samples,
-             "" if heat is None else ", heatmap %d samples" % heat.samples),
+             "" if heat is None else ", heatmap %d passes" % heat.passes),
           flush=True)
     return 0
 
@@ -640,18 +864,18 @@ def cmd_stats(args):
         print(line)
 
     base = heatmap_base(args)
-    if base and os.path.exists(base + ".bin"):
+    if base and os.path.isdir(base + "-weeks"):
         heat = Heatmap.load_or_new(base)
-        total = HEAT_N_BANDS * HEAT_SIZE * HEAT_SIZE
+        total = HEAT_CELLS
         print()
-        print("heatmap  %d of %d cells (%.1f%%), %s positions"
+        print("heatmap  %d of %d cells (%.1f%%), %s passes over %d weeks"
               % (heat.filled(), total, 100.0 * heat.filled() / total,
-                 f"{heat.samples:,}"))
+                 f"{heat.passes:,}", len(heat.weeks)))
         print("  band             cells   busiest cell")
         for b in range(HEAT_N_BANDS):
             lo, hi = HEAT_BAND_EDGES[b], HEAT_BAND_EDGES[b + 1]
             start = b * HEAT_SIZE * HEAT_SIZE
-            chunk = heat.cells[start:start + HEAT_SIZE * HEAT_SIZE]
+            chunk = heat.totals[start:start + HEAT_SIZE * HEAT_SIZE]
             filled = sum(1 for v in chunk if v)
             if filled:
                 print("  %5d-%-5d  %10d   %12d" % (lo, hi, filled, max(chunk)))
@@ -678,7 +902,7 @@ def main(argv=None):
     collect.add_argument("--save-every", type=float, default=60.0)
     collect.add_argument("--heatmap-every", type=float, default=300.0,
                          help="seconds between heatmap saves (default: "
-                              "%(default)s; it is a fixed 1.4 MB each time)")
+                              "%(default)s)")
     collect.add_argument("--duration", type=float, default=None,
                          help="stop after N seconds (for testing)")
     collect.set_defaults(func=cmd_collect)

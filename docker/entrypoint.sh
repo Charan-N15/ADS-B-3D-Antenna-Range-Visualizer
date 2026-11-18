@@ -74,8 +74,8 @@ fi
 # reports done.
 if [ "${RANGE3D_BASEMAP:-1}" != "0" ] && [ ! -f "$DATA/basemap/meta.json" ]; then
   say "downloading map tiles in the background"
-  ( python3 /app/tools/fetch-basemap.py --base-url "$TAR1090_URL" \
-      --radius-nm "${RANGE3D_RADIUS_NM:-250}" --zoom "${RANGE3D_ZOOM:-8}" \
+  ( python3 /app/tools/fetch-basemap.py --base-url "$TAR1090_URL" --envelope "$STATE" \
+      --radius-nm "${RANGE3D_RADIUS_NM:-auto}" --zoom "${RANGE3D_ZOOM:-auto}" \
     || say "map download failed; restart the container to retry" ) &
 fi
 

@@ -42,7 +42,7 @@
       <svg viewBox="0 0 18 18"><path d="M2.5 5h13M2.5 9h13M2.5 13h13"/><circle cx="6" cy="5" r="1.8"/><circle cx="12" cy="9" r="1.8"/><circle cx="7.5" cy="13" r="1.8"/></svg>
       <span>View</span>
     </button>
-    <button class="rail-btn sect" data-sect="info" title="Envelope info">
+    <button class="rail-btn sect" id="infoButton" data-sect="info" title="Envelope info">
       <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="7"/><path d="M9 8.2v4.6M9 5.4v.6"/></svg>
       <span>Info</span>
     </button>
@@ -64,14 +64,13 @@
           <label><input type="checkbox" id="layerEnvelope" checked> Envelope surface</label>
           <label><input type="checkbox" id="layerContours" checked> Altitude rings</label>
           <label><input type="checkbox" id="layerHorizon"> Theoretical horizon</label>
-          <label class="sub"><input type="checkbox" id="extendHorizon"> Extend to top</label>
+          <label class="sub" id="extendHorizonRow" hidden><input type="checkbox" id="extendHorizon"> Extend to top</label>
           <label><input type="checkbox" id="layerFootprint" checked> Ground footprint</label>
-          <label><input type="checkbox" id="layerAircraft3d" checked> Live traffic 3D</label>
-          <label><input type="checkbox" id="layerAircraft2d"> Live traffic 2D</label>
+          <label><input type="checkbox" id="layerAircraft3d" checked> Live traffic</label>
+          <label><input type="checkbox" id="layerTrails" checked> Trails</label>
           <label><input type="checkbox" id="layerGround" checked> Range rings</label>
           <label><input type="checkbox" id="layerBasemap" checked> Map</label>
-          <label class="slider">Map level <span id="mapOpacityOut">100%</span>
-            <input type="range" id="mapOpacity" min="0" max="100" step="5" value="100"></label>
+          <label><input type="checkbox" id="curvature" checked> Earth curvature</label>
         </div>
 
         <div class="grp" id="altLegendGroup">
@@ -83,25 +82,48 @@
       <section data-sect="view" hidden>
         <div class="grp">
           <h2>View</h2>
-          <label><input type="checkbox" id="curvature" checked> Earth curvature</label>
-          <label><input type="checkbox" id="colorByAlt" checked> Colour by altitude</label>
-          <label><input type="checkbox" id="closure" checked> Altitude closure</label>
-          <label class="slider">Vertical <span id="exagOut">8&times;</span>
-            <input type="range" id="exag" min="1" max="24" step="1" value="8"></label>
           <label class="slider">Smooth <span id="smoothOut">7&deg;</span>
             <input type="range" id="smooth" min="1" max="15" step="2" value="7"></label>
-          <label class="slider">Min hits <span id="hitsOut">1</span>
-            <input type="range" id="hits" min="1" max="6" step="1" value="1"></label>
-          <label class="field">Antenna ft
-            <input type="number" id="rxAlt" min="0" max="10000" step="10" value="100"></label>
+          <label class="slider">Plane size <span id="planeSizeOut">100%</span>
+            <input type="range" id="planeSize" min="50" max="250" step="10" value="100"></label>
+        </div>
+
+        <div class="grp">
+          <label class="grpHead"><input type="checkbox" id="layerLabels"> Labels</label>
+          <div class="grpBody" id="labelsBody" hidden>
+          <div class="segs" id="labelFields" role="group" aria-label="Label fields">
+            <div class="seg">
+              <button type="button" data-field="callsign">Callsign</button>
+              <button type="button" data-field="altitude">Altitude</button>
+              <button type="button" data-field="type">Type</button>
+            </div>
+            <div class="seg">
+              <button type="button" data-field="range">Range</button>
+              <button type="button" data-field="signal">Signal</button>
+            </div>
+          </div>
+          <div class="labelPreview">
+            <i class="labelPreviewPlane"></i>
+            <span class="labelPreviewBox" id="labelPreviewBox"></span>
+            <span class="labelPreviewEmpty" id="labelPreviewEmpty" hidden>nothing to show</span>
+          </div>
+          </div>
+        </div>
+
+        <div class="grp">
+          <label class="grpHead"><input type="checkbox" id="layerHeat"> Heat footprint</label>
+          <div class="grpBody" id="heatBody" hidden>
+            <label class="slider">Routes shown <span id="heatPctOut">top 30%</span>
+              <input type="range" id="heatPct" min="0" max="10" step="1" value="6"></label>
+          </div>
         </div>
 
         <div class="grp">
           <h2>Altitude filter</h2>
           <label class="field">From ft
-            <input type="number" id="altMin" min="0" max="50000" step="500" value="0"></label>
+            <input type="number" id="altMin" min="0" max="53000" step="500" value="0"></label>
           <label class="field">To ft
-            <input type="number" id="altMax" min="0" max="50000" step="500" value="50000"></label>
+            <input type="number" id="altMax" min="0" max="53000" step="500" value="53000"></label>
           <div class="row"><button id="altReset">Show all</button></div>
         </div>
 
@@ -112,6 +134,18 @@
           <label class="slider">Spread <span id="spreadOut">&plusmn;5&deg;</span>
             <input type="range" id="sliceSpread" min="0" max="30" step="1" value="5"></label>
         </div>
+
+        <details class="grp" id="advancedGroup">
+          <summary>Advanced</summary>
+          <label><input type="checkbox" id="colorByAlt" checked> Colour by altitude</label>
+          <label><input type="checkbox" id="closure" checked> Altitude closure</label>
+          <label class="slider">Vertical <span id="exagOut">8&times;</span>
+            <input type="range" id="exag" min="1" max="24" step="1" value="8"></label>
+          <label class="slider">Min hits <span id="hitsOut">1</span>
+            <input type="range" id="hits" min="1" max="6" step="1" value="1"></label>
+          <label class="field">Antenna ft
+            <input type="number" id="rxAlt" min="0" max="10000" step="10" value="100"></label>
+        </details>
       </section>
 
       <section data-sect="info" hidden>
@@ -119,6 +153,11 @@
           <h2>Envelope</h2>
           <p class="since" id="collectedSince"></p>
           <dl id="stats"></dl>
+        </div>
+        <div class="grp" id="heatGroup" hidden>
+          <h2>Heat footprint</h2>
+          <p class="since" id="heatSince"></p>
+          <dl id="heatStats"></dl>
         </div>
         <div class="grp" id="pickGroup" hidden>
           <h2>Selected cell</h2>
@@ -141,6 +180,7 @@
 
   <div id="stage">
     <canvas id="scene"></canvas>
+    <canvas id="labels"></canvas>
     <canvas id="slice" hidden></canvas>
     <div id="hint">drag to orbit &middot; wheel to zoom &middot; click the surface for the contact that set it</div>
     <div id="attribution"></div>

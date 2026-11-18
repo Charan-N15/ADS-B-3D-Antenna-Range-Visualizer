@@ -11,11 +11,15 @@ Tiles are stored as fetched. Nothing is executed from the download directory.
 install.sh runs this for you. Run it by hand to change the zoom level or radius.
 
 Usage:
-  python tools/fetch-basemap.py --base-url http://localhost/tar1090
+  python tools/fetch-basemap.py --base-url http://localhost/tar1090 \
+      --envelope /var/lib/range3d/envelope.json
   python tools/fetch-basemap.py --lat 51.48 --lon -0.45 --radius-nm 250 --zoom 9
 
-Zoom 8 covers a 250 nm radius in about 70 tiles and is enough to read coastlines
-and major roads. Zoom 9 is four times the tiles and noticeably sharper close in.
+By default the radius is the envelope's farthest edge plus 20%, so the map covers
+what the receiver actually hears and no more, and the zoom is the sharpest that
+fits that circle in the tile and texture limits. A 140 nm envelope gets zoom 9;
+a 250 nm one zoom 8. With no envelope to read, the radius falls back to 250 nm.
+Run it again as coverage grows: tiles already on disk are not fetched twice.
 """
 
 import argparse
@@ -36,6 +40,16 @@ USER_AGENT = "range3d-basemap/1 (ADS-B coverage viewer; one-time local cache)"
 DEFAULT_TEMPLATE = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 
 EARTH_RADIUS_NM = 3440.065
+
+# Without an envelope to size it from, a radius that covers nearly any receiver.
+DEFAULT_RADIUS_NM = 250.0
+
+# How far past the envelope's farthest edge the map reaches, as a share of it.
+EDGE_MARGIN = 0.2
+
+# The viewer composes every tile into one texture. 4096 px a side is the most
+# that every GPU it might run on, a Pi's included, can take without shrinking it.
+MAX_TEXTURE_PX = 4096
 
 
 def mercator_x(lon):
@@ -75,14 +89,63 @@ def fetch(url, timeout=20.0):
         return resp.read()
 
 
+def farthest_edge_nm(source):
+    """The longest range anywhere in an envelope, from a path or a URL; None
+    if there is no envelope there yet or it holds nothing."""
+    try:
+        if source.startswith(("http://", "https://")):
+            raw = fetch(source)
+        else:
+            with open(source, "rb") as fh:
+                raw = fh.read()
+        cells = json.loads(raw).get("cells", {})
+    except (OSError, ValueError, urllib.error.URLError) as exc:
+        print("could not read the envelope at %s: %s" % (source, exc), file=sys.stderr)
+        return None
+    ranges = [cell.get("d", 0) for cell in cells.values()]
+    return max(ranges) if ranges else None
+
+
+def tile_span(lat, lon, radius_nm, zoom):
+    """The tiles covering a circle: x0, x1, y0, y1, inclusive."""
+    south, north, west, east = bounding_box(lat, lon, radius_nm)
+    n = 2 ** zoom
+    x0 = max(0, int(mercator_x(west) * n))
+    x1 = min(n - 1, int(mercator_x(east) * n))
+    y0 = max(0, int(mercator_y(north) * n))     # north is the smaller tile y
+    y1 = min(n - 1, int(mercator_y(south) * n))
+    return x0, x1, y0, y1
+
+
+def fits(span, max_tiles):
+    x0, x1, y0, y1 = span
+    across, down = x1 - x0 + 1, y1 - y0 + 1
+    return (across * down <= max_tiles
+            and max(across, down) * 256 <= MAX_TEXTURE_PX)
+
+
+def auto_zoom(lat, lon, radius_nm, max_tiles):
+    """The sharpest zoom whose tiles fit both limits."""
+    for zoom in range(12, 3, -1):
+        if fits(tile_span(lat, lon, radius_nm, zoom), max_tiles):
+            return zoom
+    return 4
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--lat", type=float, default=None)
     parser.add_argument("--lon", type=float, default=None)
     parser.add_argument("--base-url", default=None,
                         help="tar1090 base URL to read receiver.json from")
-    parser.add_argument("--radius-nm", type=float, default=250.0)
-    parser.add_argument("--zoom", type=int, default=8)
+    parser.add_argument("--radius-nm", default="auto",
+                        help="map radius in nm, or 'auto' for the envelope's "
+                             "farthest edge plus 20%% (default)")
+    parser.add_argument("--envelope", default=None,
+                        help="envelope.json path or URL to size the map from")
+    parser.add_argument("--zoom", default="auto",
+                        help="tile zoom level, or 'auto' for the sharpest that "
+                             "fits (default)")
     parser.add_argument("--template", default=DEFAULT_TEMPLATE)
     parser.add_argument("--attribution", default="© OpenStreetMap contributors")
     parser.add_argument("--max-tiles", type=int, default=400,
@@ -91,6 +154,8 @@ def main():
                         help="seconds between requests")
     parser.add_argument("--force", action="store_true",
                         help="re-download tiles already present")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="work out the radius, zoom and tiles, then stop")
     args = parser.parse_args()
 
     lat, lon = args.lat, args.lon
@@ -101,34 +166,42 @@ def main():
         lat, lon = receiver["lat"], receiver["lon"]
         print("receiver position %.6f, %.6f" % (lat, lon))
 
-    south, north, west, east = bounding_box(lat, lon, args.radius_nm)
-    n = 2 ** args.zoom
-    x0 = int(mercator_x(west) * n)
-    x1 = int(mercator_x(east) * n)
-    y0 = int(mercator_y(north) * n)     # north is the smaller tile y
-    y1 = int(mercator_y(south) * n)
+    if args.radius_nm == "auto":
+        edge = farthest_edge_nm(args.envelope) if args.envelope else None
+        if edge:
+            # Rounded up to the next 10 nm, so small growth does not move it.
+            radius_nm = math.ceil(edge * (1 + EDGE_MARGIN) / 10) * 10
+            print("envelope reaches %.1f nm; map radius %d nm" % (edge, radius_nm))
+        else:
+            radius_nm = DEFAULT_RADIUS_NM
+            print("no envelope to size from; map radius %d nm" % radius_nm)
+    else:
+        radius_nm = float(args.radius_nm)
 
-    x0, x1 = max(0, x0), min(n - 1, x1)
-    y0, y1 = max(0, y0), min(n - 1, y1)
+    zoom = (auto_zoom(lat, lon, radius_nm, args.max_tiles) if args.zoom == "auto"
+            else int(args.zoom))
+    x0, x1, y0, y1 = tile_span(lat, lon, radius_nm, zoom)
     across, down = x1 - x0 + 1, y1 - y0 + 1
     total = across * down
 
     print("zoom %d, %d x %d = %d tiles, texture %d x %d px"
-          % (args.zoom, across, down, total, across * 256, down * 256))
+          % (zoom, across, down, total, across * 256, down * 256))
     if total > args.max_tiles:
         print("that exceeds --max-tiles (%d); lower --zoom or --radius-nm"
               % args.max_tiles, file=sys.stderr)
         return 1
+    if args.dry_run:
+        return 0
 
     os.makedirs(OUT_DIR, exist_ok=True)
     fetched = skipped = failed = 0
     for x in range(x0, x1 + 1):
         for y in range(y0, y1 + 1):
-            path = os.path.join(OUT_DIR, str(args.zoom), str(x), "%d.png" % y)
+            path = os.path.join(OUT_DIR, str(zoom), str(x), "%d.png" % y)
             if os.path.exists(path) and not args.force:
                 skipped += 1
                 continue
-            url = args.template.format(z=args.zoom, x=x, y=y)
+            url = args.template.format(z=zoom, x=x, y=y)
             try:
                 body = fetch(url)
             except (urllib.error.URLError, OSError) as exc:
@@ -143,11 +216,11 @@ def main():
         print("  column %d/%d" % (x - x0 + 1, across), flush=True)
 
     meta = {
-        "zoom": args.zoom,
+        "zoom": zoom,
         "x0": x0, "x1": x1, "y0": y0, "y1": y1,
         "tileSize": 256,
         "center": {"lat": lat, "lon": lon},
-        "radiusNm": args.radius_nm,
+        "radiusNm": radius_nm,
         "attribution": args.attribution,
         "fetched": int(time.time()),
     }

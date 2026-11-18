@@ -88,4 +88,4 @@ export function altitudeCss(altFt, alpha) {
 }
 
 /** Altitudes worth labelling in a legend, spanning the ramp's useful range. */
-export const LEGEND_ALTITUDES = [0, 2000, 5000, 10000, 20000, 30000, 40000];
+export const LEGEND_ALTITUDES = [0, 2000, 5000, 10000, 20000, 30000, 40000, 50000];

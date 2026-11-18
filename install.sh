@@ -14,8 +14,10 @@
 # Options:
 #   --base-url URL     tar1090 base URL           (default http://localhost/tar1090)
 #   --antenna-ft N     antenna height above sea level, feet
-#   --radius-nm N      map and coverage radius    (default 250)
-#   --zoom N           map tile zoom level        (default 8)
+#   --radius-nm N      map radius                 (default: envelope's farthest edge + 20%)
+#   --zoom N           map tile zoom level        (default: sharpest that fits)
+#   --refresh-map      replace the downloaded map with a fresh one, sized to the
+#                      envelope as it is now (run it again as coverage grows)
 #   --no-basemap       skip downloading map tiles
 #   --no-button        do not touch tar1090's config.js
 #   --tar1090-html DIR override tar1090's html directory
@@ -24,9 +26,10 @@ set -euo pipefail
 
 BASE_URL=""
 ANTENNA_FT=""
-RADIUS_NM=250
-ZOOM=8
+RADIUS_NM=auto
+ZOOM=auto
 WANT_BASEMAP=1
+REFRESH_MAP=0
 WANT_BUTTON=1
 TAR1090_HTML=""
 
@@ -54,14 +57,18 @@ while [ $# -gt 0 ]; do
     --radius-nm) RADIUS_NM="$2"; shift 2 ;;
     --zoom) ZOOM="$2"; shift 2 ;;
     --no-basemap) WANT_BASEMAP=0; shift ;;
+    --refresh-map) REFRESH_MAP=1; shift ;;
     --no-button) WANT_BUTTON=0; shift ;;
     --tar1090-html) TAR1090_HTML="$2"; shift 2 ;;
-    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
     *) die "unknown option: $1" ;;
   esac
 done
 
 [ "$(id -u)" -eq 0 ] || die "run with sudo"
+if [ "$REFRESH_MAP" -eq 1 ] && [ "$WANT_BASEMAP" -eq 0 ]; then
+  die "--refresh-map and --no-basemap ask for opposite things"
+fi
 
 # ----------------------------------------------------------------- prerequisites
 command -v python3 >/dev/null || die "python3 is required"
@@ -137,15 +144,30 @@ systemctl restart "$UNIT_NAME"
 say "collector running"
 
 # ------------------------------------------------------------------------ basemap
+MAP_DIR="$SRC_DIR/viewer/basemap"
+MAP_REFRESHED=0
 if [ "$WANT_BASEMAP" -eq 1 ]; then
-  if [ -f "$SRC_DIR/viewer/basemap/meta.json" ]; then
-    say "map tiles already downloaded; skipping"
+  # A refresh sets the old map aside rather than deleting it straight away, so a
+  # download that fails part way leaves the map that was working.
+  if [ "$REFRESH_MAP" -eq 1 ] && [ -d "$MAP_DIR" ]; then
+    say "setting the current map aside to fetch a new one"
+    rm -rf "$MAP_DIR.old"
+    mv "$MAP_DIR" "$MAP_DIR.old"
+  fi
+  if [ -f "$MAP_DIR/meta.json" ]; then
+    say "map tiles already downloaded; skipping (--refresh-map replaces them)"
   else
     say "downloading map tiles (one time, a few hundred of them at most)"
     if python3 "$SRC_DIR/tools/fetch-basemap.py" \
-        --lat "$RX_LAT" --lon "$RX_LON" \
+        --lat "$RX_LAT" --lon "$RX_LON" --envelope "$STATE_FILE" \
         --radius-nm "$RADIUS_NM" --zoom "$ZOOM"; then
       say "map tiles stored in the repository"
+      rm -rf "$MAP_DIR.old"
+      MAP_REFRESHED=1
+    elif [ -d "$MAP_DIR.old" ]; then
+      rm -rf "$MAP_DIR"
+      mv "$MAP_DIR.old" "$MAP_DIR"
+      echo "    map download failed; kept the map you already had." >&2
     else
       echo "    map download failed; installing without a basemap." >&2
       echo "    Re-run tools/fetch-basemap.py later and re-run this installer." >&2
@@ -155,6 +177,10 @@ fi
 
 # ------------------------------------------------------------------------- viewer
 install -d -m 0755 "$WEB_DIR"
+# Copying only adds files, so a replaced map's old tiles would otherwise linger.
+if [ "$MAP_REFRESHED" -eq 1 ]; then
+  rm -rf "$WEB_DIR/basemap"
+fi
 cp -r "$SRC_DIR/viewer/." "$WEB_DIR"/
 
 # The viewer runs in a browser, so it needs the path tar1090 is served from rather

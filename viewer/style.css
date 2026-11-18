@@ -106,6 +106,17 @@ html, body {
 .rail-btn:hover { color: var(--fg); }
 .rail-btn.on { color: var(--accent); background: var(--panel); border-color: var(--line); }
 
+/* A selected cell waiting in Info: the button takes the cell's altitude colour,
+   pulsing twice when a new one is picked. */
+.rail-btn.waiting { color: var(--pick); }
+.rail-btn.waiting svg { animation: pickPulse 0.9s ease-out 2; }
+
+@keyframes pickPulse {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.22); }
+  100% { transform: scale(1); }
+}
+
 /* ----------------------------------------------------------------- panel */
 
 #panel {
@@ -150,6 +161,41 @@ h2 {
   color: var(--faint);
 }
 
+/* A group that folds away behind its heading, for the settings that are set
+   once and left. The browser's own details element, so the keyboard opens it. */
+/* A group whose heading is its own on/off switch, its settings opening under it. */
+label.grpHead {
+  padding: 0;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.grpBody { margin-top: 7px; }
+.grpBody[hidden] { display: none; }
+
+details.grp > summary {
+  display: flex;
+  align-items: center;
+  list-style: none;
+  font-size: var(--size);
+  font-weight: 500;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+details.grp > summary::-webkit-details-marker { display: none; }
+
+details.grp > summary::after {
+  content: "\203A";
+  margin-left: auto;
+  color: var(--faint);
+  transition: transform 0.15s;
+}
+
+details.grp > summary:hover::after { color: var(--accent); }
+details.grp[open] > summary { margin-bottom: 7px; }
+details.grp[open] > summary::after { transform: rotate(90deg); }
+
 /* ---------------------------------------------------------------- controls */
 
 label {
@@ -163,6 +209,8 @@ label {
 
 label:hover { color: var(--fg); }
 label.sub { padding-left: 14px; }
+/* label sets its own display, which outranks the hidden attribute's; restore it. */
+label[hidden] { display: none; }
 
 /* A switch, not a tick box: with a single warm accent the knob's position
    carries the on/off state instead of colour alone having to. */
@@ -245,6 +293,89 @@ button {
 
 button:hover { border-color: var(--accent); color: var(--accent); }
 
+/* The selected cell's panel, edged and faintly filled in the cell's colour. */
+#pickGroup {
+  border-color: var(--pick, var(--line));
+  background: color-mix(in srgb, var(--pick, transparent) 12%, transparent);
+}
+
+#pickGroup h2::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 7px;
+  border-radius: 2px;
+  background: var(--pick, var(--faint));
+}
+
+/* Rows of strips stacked into one control. */
+.segs { margin: 2px 0 6px; }
+.segs .seg { margin: 0; }
+.segs .seg + .seg { margin-top: 4px; }
+
+/* A row of buttons that each switch one thing on or off, joined into a strip. */
+.seg {
+  display: flex;
+  margin: 2px 0 6px;
+  border: 1px solid var(--ctl);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.seg button {
+  padding: 5px 0;
+  color: var(--faint);
+  border: 0;
+  border-right: 1px solid var(--ctl);
+  border-radius: 0;
+}
+
+.seg button:last-child { border-right: 0; }
+.seg button:hover { color: var(--fg); border-color: var(--ctl); }
+.seg button.on { color: var(--panel); background: var(--accent); }
+
+/* What a label will look like, drawn the way the scene draws it. */
+.labelPreview {
+  position: relative;
+  height: 54px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.labelPreviewPlane {
+  position: absolute;
+  left: 13px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  background: var(--dim);
+  transform: rotate(45deg);
+}
+
+.labelPreviewBox {
+  position: absolute;
+  left: 25px;
+  bottom: 10px;
+  padding: 3px 5px;
+  color: var(--fg);
+  background: rgba(15, 16, 18, 0.5);
+  border: 1px solid var(--ctl);
+  font: 12px/14px var(--mono);
+  white-space: pre;
+}
+
+.labelPreviewEmpty {
+  position: absolute;
+  left: 25px;
+  bottom: 10px;
+  color: var(--faint);
+  font-size: var(--size-small);
+}
+
+.labelPreviewBox[hidden], .labelPreviewEmpty[hidden] { display: none; }
+
 #settingsNote {
   margin: 6px 0 0;
   min-height: 14px;
@@ -297,7 +428,10 @@ dd {
 #stage { position: relative; flex: 1; min-width: 0; }
 
 #scene, #slice { display: block; width: 100%; height: 100%; }
-#scene[hidden], #slice[hidden] { display: none; }
+#scene[hidden], #slice[hidden], #labels[hidden] { display: none; }
+
+/* Live traffic's data blocks, over the scene. Clicks go through to the surface. */
+#labels { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 #slice { background: var(--bg); }
 
 #hint {
