@@ -52,23 +52,27 @@ observations rather than inferences. The viewer can toggle it off.
 **Azimuth:** 1°, bin = `floor(bearing_true)`, 360 bins. Rendered with an adjustable
 boxcar smooth, default 5°, because single degrees are sparse at low altitude.
 
-**Altitude:** non-uniform, 50 bands. Detail belongs low down, where the horizon is
+**Altitude:** non-uniform, 67 bands. Detail belongs low down, where the horizon is
 doing the limiting:
 
 | Range | Step | Bands |
 |---|---|---|
 | 0 – 2,000 ft | 250 ft | 8 |
 | 2,000 – 10,000 ft | 500 ft | 16 |
-| 10,000 – 25,000 ft | 1,000 ft | 15 |
-| 25,000 – 50,000 ft | 2,500 ft | 10 |
-| 50,000 – 53,000 ft | 3,000 ft | 1 |
+| 10,000 – 53,000 ft | 1,000 ft | 43 |
 
-50 bands × 360 bearings = 18,000 cells, most of them empty. The top reaches 53,000 ft,
+67 bands × 360 bearings = 24,120 cells, most of them empty. The top reaches 53,000 ft,
 over the 51,000 ft ceiling of the highest business jets; a report of exactly 53,000 ft
-counts in the top band.
-Bands were added above 50,000 ft after release; an older state file is upgraded in
-place on first load, since bands on top leave every existing band number unchanged,
-and the original is kept beside it.
+counts in the top band. The viewer draws the envelope only up to the highest band
+anything has been heard in, on any bearing, so it never claims coverage above the
+highest aircraft actually received.
+
+Up to v1.2 the bands from 25,000 ft were 2,500 ft wide, ending at 50,000 ft. An older
+state file is converted on first load: each cell keeps one record, its farthest
+contact, with that contact's altitude, so cells from 25,000 ft up are re-filed under
+the 1,000 ft band the contact was in. Nothing measured is lost; the other new bands
+start without a record and fill as traffic is heard. The original file is kept
+beside it.
 
 ### 2.3 Altitude source
 

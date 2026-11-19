@@ -85,8 +85,12 @@ export function buildEnvelopeSurface(model, opts) {
   const vertexAz = new Uint16Array(360 * levels);
   const vertexBand = new Uint16Array(360 * levels);
 
+  // Each ring of vertices sits on a band boundary and takes the range of the
+  // band above it. The ring on top of the ceiling band has no band above to
+  // take from, so it takes the ceiling band's own, as the grid's top ring does.
+  const top = model.topBand >= 0 ? model.topBand : nb - 1;
   for (let level = 0; level < levels; level++) {
-    const band = Math.min(level, nb - 1);
+    const band = Math.min(level, top);
     const altFt = model.edges[level];
     const tint = altitudeThreeColor(altFt);
     for (let az = 0; az < 360; az++) {
@@ -108,8 +112,11 @@ export function buildEnvelopeSurface(model, opts) {
   // Vertices are always built for every level, even filtered-out ones: the index
   // arithmetic below depends on a dense grid, and 18,000 positions cost nothing.
   // The filter decides which quads get drawn, not which vertices exist.
-  const [loBand, hiBand] = bandRange(model, opts.altMinFt ?? 0,
+  const [loBand, filterHi] = bandRange(model, opts.altMinFt ?? 0,
     opts.altMaxFt ?? model.edges[nb]);
+  // Nothing above the ceiling: those rings repeat the ceiling's range, and
+  // would otherwise draw a wall up to the top of the grid.
+  const hiBand = Math.min(filterHi, top);
 
   // A bearing with no coverage in a band has no surface there — not a surface at
   // zero range. Collapsing those vertices to the origin would fan enormous

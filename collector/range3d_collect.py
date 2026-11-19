@@ -45,66 +45,84 @@ MAX_RC_M = 1852
 
 
 def build_band_edges():
-    """Altitude band edges in feet. Fine low down, coarse at cruise."""
+    """Altitude band edges in feet. Finest low down, where the horizon cuts
+    range off sharply with height; 1,000 ft from 10,000 ft to the top, so the
+    cruise levels and the envelope's ceiling are as fine as the climb."""
     edges = []
     for lo, hi, step in ((0, 2000, 250), (2000, 10000, 500),
-                         (10000, 25000, 1000), (25000, 50000, 2500)):
+                         (10000, ALT_TOP_FT, 1000)):
         alt = lo
         while alt < hi:
             edges.append(alt)
             alt += step
-    # One last band above 50,000 ft, up to the top.
-    edges += [50000, ALT_TOP_FT]
+    edges.append(ALT_TOP_FT)
     return edges
-
-
-def extends(old, new):
-    """True when `new` is `old` with bands added on top and nothing else changed.
-
-    Cells are keyed by band number counted from the ground up, so bands added
-    above the old top leave every existing number, and so every count and
-    record, meaning exactly what it did. Anything else would reinterpret them.
-    """
-    return (isinstance(old, list) and 2 <= len(old) < len(new)
-            and new[:len(old)] == old)
-
-
-def from_60k(path, doc):
-    """Brings a state file from the 60,000 ft build down to this one's bands.
-
-    The band from 50,000 ft keeps its number and now reaches 53,000 ft; the
-    bands above it are dropped, with any cells in them. The file as it was is
-    kept beside it.
-    """
-    top = N_BANDS - 1
-    dropped = [key for key in doc.get("cells", {}) if int(key.split(",")[1]) > top]
-    for key in dropped:
-        del doc["cells"][key]
-    doc["bandEdges"] = BAND_EDGES
-    backup = path + ".before-53000ft"
-    if not os.path.exists(backup):
-        shutil.copy2(path, backup)
-    print("%s: bands brought down from 60,000 to %s ft, %d cells above that "
-          "dropped; the old file is kept as %s"
-          % (path, f"{ALT_TOP_FT:,}", len(dropped), backup), flush=True)
-
-
-def back_up(path, old_top_ft):
-    """Keeps a copy of a file as it was before its bands were extended."""
-    backup = "%s.before-%dft" % (path, ALT_TOP_FT)
-    if not os.path.exists(backup):
-        shutil.copy2(path, backup)
-    print("%s: bands extended from %d to %d ft; the old file is kept as %s"
-          % (path, old_top_ft, ALT_TOP_FT, backup), flush=True)
 
 
 BAND_EDGES = build_band_edges()
 N_BANDS = len(BAND_EDGES) - 1
 
-# A development build briefly took the bands to 60,000 ft in 2,500 ft steps. Its
-# bands up to 50,000 ft are these ones, so its files are brought back down by
-# dropping whatever sits above the new top band.
-EDGES_60K = BAND_EDGES[:-1] + [52500, 55000, 57500, 60000]
+# Older layouts all match this one below 25,000 ft and differ above it: 2,500 ft
+# bands to 50,000 ft as released, and two short-lived development tops. Their
+# cells from 25,000 ft up are re-filed on load (rebin).
+REBIN_FROM_FT = 25000
+
+
+def rebin(path, doc):
+    """Moves a state file from an older band layout onto this one. Returns
+    False, touching nothing, if the layout is not one this can convert.
+
+    A cell keeps one record: the farthest contact in that band at that bearing,
+    with its altitude. So each cell from REBIN_FROM_FT up is filed under the new
+    band that contact was actually in. Nothing measured is lost; the new bands
+    the old one covered start without a record of their own, and closure covers
+    them from below until contacts arrive. A record is never copied down into a
+    lower band: being heard at one height says nothing about hearing a lower
+    aircraft that far out. Records above the top are dropped.
+    """
+    old = doc.get("bandEdges")
+    cut = BAND_EDGES.index(REBIN_FROM_FT)
+    if not isinstance(old, list) or len(old) <= cut + 1 \
+            or old[:cut + 1] != BAND_EDGES[:cut + 1]:
+        return False
+
+    cells = {}
+    moved = dropped = 0
+    for key, cell in doc.get("cells", {}).items():
+        az, band = (int(x) for x in key.split(","))
+        if band < cut:
+            cells[key] = cell
+            continue
+        alt = (cell.get("rec") or {}).get("alt")
+        new_band = band_of(alt) if isinstance(alt, (int, float)) else None
+        if new_band is None and band < len(old) - 1:
+            new_band = band_of(old[band])   # no altitude: the old band's floor
+        if new_band is None:
+            dropped += 1
+            continue
+        moved += 1
+        new_key = "%d,%d" % (az, new_band)
+        mine = cells.get(new_key)
+        if mine is None:
+            cells[new_key] = cell
+            continue
+        mine["n"] = mine.get("n", 0) + cell.get("n", 0)
+        mine["t0"] = min(mine.get("t0", cell.get("t0", 0)), cell.get("t0", mine.get("t0", 0)))
+        mine["t1"] = max(mine.get("t1", 0), cell.get("t1", 0))
+        if cell.get("d", 0) > mine.get("d", 0):
+            mine["d"] = cell["d"]
+            mine["rec"] = cell.get("rec")
+
+    backup = path + ".before-band-change"
+    if not os.path.exists(backup):
+        shutil.copy2(path, backup)
+    doc["cells"] = cells
+    doc["bandEdges"] = BAND_EDGES
+    print("%s: altitude bands from %s ft re-filed into 1,000 ft steps: %d cells "
+          "moved by their contact's altitude, %d above the top dropped; the old "
+          "file is kept as %s"
+          % (path, f"{REBIN_FROM_FT:,}", moved, dropped, backup), flush=True)
+    return True
 
 
 # --------------------------------------------------------------------- heatmap
@@ -227,18 +245,10 @@ class Envelope:
         if doc.get("version") != STATE_VERSION:
             raise SystemExit("state file version %r is not %d; refusing to touch it"
                              % (doc.get("version"), STATE_VERSION))
-        old_edges = doc.get("bandEdges")
-        if old_edges == EDGES_60K:
-            from_60k(path, doc)
-            old_edges = BAND_EDGES
-        if old_edges != BAND_EDGES:
-            if not extends(old_edges, BAND_EDGES):
-                raise SystemExit(
-                    "state file band edges differ from this build's. Migrate or start "
-                    "a new file; silently rebinning would corrupt the record.")
-            # Only bands on top are new, so the cells carry over as they are and
-            # the next save writes the new edges.
-            back_up(path, old_edges[-1])
+        if doc.get("bandEdges") != BAND_EDGES and not rebin(path, doc):
+            raise SystemExit(
+                "state file band edges differ from this build's. Migrate or start "
+                "a new file; silently rebinning would corrupt the record.")
         env = cls()
         env.rx = doc.get("rx", {"lat": None, "lon": None, "altFt": None})
         env.created = doc.get("created", env.created)

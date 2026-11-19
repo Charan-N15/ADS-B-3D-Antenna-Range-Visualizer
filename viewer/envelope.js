@@ -42,6 +42,16 @@ export function buildGrid(doc, { minHits = 2, closure = true, smoothDeg = 5 } = 
     hits[az * nb + band] = n;
   }
 
+  // The ceiling: the highest band anything has been heard in, on any bearing.
+  // Closure carries coverage upward, but only this far; above it nothing has
+  // been heard at all, so the envelope claims nothing there either.
+  let topBand = -1;
+  for (let band = nb - 1; band >= 0 && topBand < 0; band--) {
+    for (let az = 0; az < 360; az++) {
+      if (ranges[az * nb + band] > 0) { topBand = band; break; }
+    }
+  }
+
   let grid = ranges;
 
   if (closure) {
@@ -49,7 +59,7 @@ export function buildGrid(doc, { minHits = 2, closure = true, smoothDeg = 5 } = 
     for (let az = 0; az < 360; az++) {
       let running = 0;
       const row = az * nb;
-      for (let band = 0; band < nb; band++) {
+      for (let band = 0; band <= topBand; band++) {
         if (grid[row + band] > running) running = grid[row + band];
         grid[row + band] = running;
       }
@@ -74,7 +84,7 @@ export function buildGrid(doc, { minHits = 2, closure = true, smoothDeg = 5 } = 
     grid = out;
   }
 
-  return { grid, hits, nBands: nb, edges: doc.bandEdges, doc };
+  return { grid, hits, nBands: nb, topBand, edges: doc.bandEdges, doc };
 }
 
 /** Max range at a bearing and band, with bearings wrapped. */
