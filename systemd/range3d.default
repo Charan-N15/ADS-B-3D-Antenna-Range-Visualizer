@@ -21,6 +21,8 @@ RANGE3D_STATE="--state /var/lib/range3d/envelope.json"
 #RANGE3D_ANTENNA_FT="--rx-alt-ft 100"
 
 # How often to sample aircraft.json, and how often to write the envelope to disk.
-# One second matches how often readsb regenerates the file. Saving every 60 s keeps
-# writes off the SD card without risking much on an unclean shutdown.
+# One second matches how often readsb regenerates the file. The envelope is checked
+# every 60 s but only written when a new record was set; otherwise it waits for
+# --save-idle (30 minutes by default), which keeps writes off the SD card. An
+# unclean shutdown can lose at most that long of hit counts, never a record.
 RANGE3D_COLLECT_OPTIONS="--interval 1 --save-every 60"

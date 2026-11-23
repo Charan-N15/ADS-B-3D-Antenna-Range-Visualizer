@@ -698,9 +698,11 @@ def cmd_collect(args):
 
     url = base + "/data/aircraft.json"
     last_save = time.time()
+    last_check = time.time()
     last_heat_save = time.time()
     backoff = 1.0
     records = 0
+    records_saved = 0     # records already on disk
     deadline = time.time() + args.duration if args.duration else None
 
     while not stopping["now"]:
@@ -735,11 +737,24 @@ def cmd_collect(args):
             cutoff = now - 600
             last_fix = {k: v for k, v in last_fix.items() if v > cutoff}
 
-        if time.time() - last_save >= args.save_every:
-            env.save(args.state)
-            last_save = time.time()
-            print("saved: %d cells, %d samples, %d records set"
-                  % (len(env.cells), env.samples, records), flush=True)
+        # The envelope is rewritten whole, a few MB each time, so it is written
+        # only when it matters. Every --save-every it is checked: a new farthest
+        # record since the last write is saved then, since records are the
+        # envelope. Otherwise only hit counts and times have moved, and those
+        # wait for --save-idle. On a mature envelope records are rare, which cuts
+        # the writes to the SD card from one a minute to a few an hour.
+        now_t = time.time()
+        if now_t - last_check >= args.save_every:
+            last_check = now_t
+            fresh = records - records_saved
+            if fresh or now_t - last_save >= args.save_idle:
+                env.save(args.state)
+                last_save = now_t
+                records_saved = records
+                print("saved: %d cells, %d samples, %d records set (%s)"
+                      % (len(env.cells), env.samples, records,
+                         "%d new" % fresh if fresh else "no new records; periodic save"),
+                      flush=True)
 
         if heat is not None and time.time() - last_heat_save >= args.heatmap_every:
             heat.forget(now)
@@ -909,7 +924,12 @@ def main(argv=None):
 
     collect = sub.add_parser("collect", help="poll aircraft.json and accumulate")
     collect.add_argument("--interval", type=float, default=1.0)
-    collect.add_argument("--save-every", type=float, default=60.0)
+    collect.add_argument("--save-every", type=float, default=60.0,
+                         help="seconds between checks for new records to save "
+                              "(default: %(default)s)")
+    collect.add_argument("--save-idle", type=float, default=1800.0,
+                         help="with no new records, seconds before saving anyway, "
+                              "for hit counts and times (default: %(default)s)")
     collect.add_argument("--heatmap-every", type=float, default=300.0,
                          help="seconds between heatmap saves (default: "
                               "%(default)s)")

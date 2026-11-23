@@ -116,7 +116,12 @@ next layer, since to the north and east terrain is almost certainly the limit.
 
 ## 4. Storage
 
-One JSON file, grown in place, written atomically (temp file + rename) every 60 s.
+One JSON file, grown in place, written atomically (temp file + rename). It is checked
+every 60 s and written only if a new farthest record has been set since the last write;
+otherwise it waits up to 30 minutes, since only hit counts and times have changed. A
+mature envelope sets few records, so this keeps a several-MB rewrite from happening
+every minute on an SD card. An unclean shutdown can lose up to 30 minutes of hit
+counts, never a record.
 All-time only; no per-day buckets.
 
 ```jsonc
@@ -183,7 +188,7 @@ dependencies to maintain on production infrastructure.
 
 | Mode | Purpose |
 |---|---|
-| `collect` | Poll `aircraft.json` at 1 Hz, accumulate, save every 60 s. SIGTERM saves cleanly. |
+| `collect` | Poll `aircraft.json` at 1 Hz, accumulate, save when a record is set (checked every 60 s) or every 30 min. SIGTERM saves cleanly. |
 | `seed-outline` | Fold `outline.json`'s 360 last-24h points into an envelope as a baseline. Real contacts, so honest to include. |
 | `merge` | Cell-wise merge of two state files. Used to carry locally collected data onto the Pi. |
 | `stats` | Print coverage summary: cells filled, range by band, measured against theoretical. |

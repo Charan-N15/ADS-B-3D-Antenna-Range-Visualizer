@@ -13,7 +13,7 @@
 #   RANGE3D_RADIUS_NM    map radius around the receiver      250
 #   RANGE3D_ZOOM         map tile zoom level                 8
 #   RANGE3D_INTERVAL     seconds between aircraft.json polls 1
-#   RANGE3D_SAVE_EVERY   seconds between envelope saves      60
+#   RANGE3D_SAVE_EVERY   seconds between checks for new records to save   60
 
 set -euo pipefail
 
