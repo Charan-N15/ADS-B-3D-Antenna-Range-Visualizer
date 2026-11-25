@@ -132,6 +132,26 @@ html, body {
 
 #panelBody { flex: 1; min-height: 0; overflow-y: auto; padding: 11px; }
 
+/* Which antenna profile is on screen, above every section. */
+#profileBar {
+  flex: none;
+  padding: 9px 11px 0;
+}
+
+#profileBar[hidden] { display: none; }
+#profileBar .since { margin: -2px 0 0; }
+
+#profileSelect {
+  margin-left: auto;
+  max-width: 140px;
+  padding: 3px 6px;
+  color: var(--fg);
+  background: var(--sunken);
+  border: 1px solid var(--ctl);
+  border-radius: var(--radius-sm);
+  font: var(--size-num)/1.5 var(--sans);
+}
+
 #panelFooter {
   flex: none;
   padding: 9px 11px 11px;
@@ -467,3 +487,43 @@ dd {
 }
 
 #status.error { color: #ff6a5e; border-color: #5a2a26; }
+
+/* Something the collector wants known, such as the receiver having moved. */
+#banner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: min(640px, 70%);
+  padding: 7px 8px 7px 12px;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  font-size: var(--size-num);
+  line-height: 1.5;
+}
+
+#banner[hidden] { display: none; }
+
+#bannerClose {
+  flex: none;
+  padding: 0 6px;
+  border: 0;
+  color: var(--faint);
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+#bannerClose:hover { color: var(--accent); }
+
+.warning {
+  margin: 0 0 6px;
+  color: var(--dim);
+  font-size: var(--size-num);
+}
+
+.warning:last-child { margin-bottom: 0; }

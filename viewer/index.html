@@ -56,6 +56,12 @@
   </nav>
 
   <aside id="panel">
+    <div id="profileBar" hidden>
+      <label class="field">Antenna
+        <select id="profileSelect" aria-label="Antenna profile"></select></label>
+      <p class="since" id="profileTag"></p>
+    </div>
+
     <div id="panelBody">
 
       <section data-sect="layers">
@@ -149,6 +155,14 @@
       </section>
 
       <section data-sect="info" hidden>
+        <div class="grp" id="warningGroup" hidden>
+          <h2>Notices</h2>
+          <div id="warningList"></div>
+        </div>
+        <div class="grp" id="profileGroup" hidden>
+          <h2>Antenna</h2>
+          <dl id="profileStats"></dl>
+        </div>
         <div class="grp">
           <h2>Envelope</h2>
           <p class="since" id="collectedSince"></p>
@@ -185,6 +199,10 @@
     <div id="hint">drag to orbit &middot; wheel to zoom &middot; click the surface for the contact that set it</div>
     <div id="attribution"></div>
     <div id="status"></div>
+    <div id="banner" role="status" hidden>
+      <span id="bannerText"></span>
+      <button id="bannerClose" title="Dismiss" aria-label="Dismiss">&times;</button>
+    </div>
   </div>
 
 </div>

@@ -1,0 +1,88 @@
+#!/bin/bash
+# range3d: manage antenna profiles. Installed to /usr/local/bin/range3d by
+# install.sh, and present in the Docker image too.
+#
+#   sudo range3d antenna list
+#   sudo range3d antenna new "Roof discone" --height 120
+#   sudo range3d antenna use "Antenna 1"
+#   sudo range3d antenna rename "Antenna 1" "Roof dipole"
+#   sudo range3d antenna height "Roof dipole" 120
+#   sudo range3d antenna delete "Old antenna"
+#   sudo range3d antenna map "Roof dipole"
+#
+# Each antenna profile has its own envelope, heatmap and map. One collects; the
+# rest are archived and can still be viewed. Changes pause the collector for a
+# moment while they are made.
+
+set -euo pipefail
+
+usage() { sed -n '5,11p' "$0" | sed 's/^# \{0,1\}//'; }
+
+BIN=/usr/local/bin/range3d_collect.py
+FETCHER=/usr/local/bin/range3d-fetch-basemap.py
+UNIT=range3d-collector.service
+DEFAULTS=/etc/default/range3d
+RUN_AS=(runuser -u range3d --)
+DOCKER=0
+
+RANGE3D_BASE_URL="--base-url http://localhost/tar1090"
+RANGE3D_STATE="--state /var/lib/range3d/envelope.json"
+RANGE3D_ANTENNA_FT=""
+if [ -f "$DEFAULTS" ]; then
+  # shellcheck disable=SC1090
+  . "$DEFAULTS"
+fi
+
+# Inside the Docker image: the same commands, run as the owner of /data.
+if [ ! -f "$BIN" ] && [ -f /app/collector/range3d_collect.py ]; then
+  DOCKER=1
+  BIN=/app/collector/range3d_collect.py
+  FETCHER=/app/tools/fetch-basemap.py
+  RANGE3D_BASE_URL="--base-url ${TAR1090_URL:-http://ultrafeeder}"
+  RANGE3D_STATE="--state /data/envelope.json"
+  RUN_AS=(setpriv --reuid="$(stat -c %u /data)" --regid="$(stat -c %g /data)" --clear-groups)
+fi
+
+if [ "${1:-}" != "antenna" ] || [ $# -lt 2 ]; then
+  usage
+  exit 1
+fi
+ACTION="$2"
+shift 2
+
+[ "$(id -u)" -eq 0 ] || { echo "range3d: run with sudo" >&2; exit 1; }
+
+EXTRA=()
+case "$ACTION" in
+  new|map) EXTRA=(--fetcher "$FETCHER") ;;
+esac
+
+# shellcheck disable=SC2086
+run() {
+  "${RUN_AS[@]}" python3 "$BIN" $RANGE3D_BASE_URL $RANGE3D_STATE $RANGE3D_ANTENNA_FT \
+    antenna "$ACTION" "$@" "${EXTRA[@]}"
+}
+
+case "$ACTION" in
+  list|map|-h|--help)
+    run "$@"
+    ;;
+  new|use|rename|height|delete)
+    # The collector reads the profiles when it starts, so it is paused while they
+    # change and picks the change up when it comes back.
+    if [ "$DOCKER" -eq 0 ] && systemctl is-active --quiet "$UNIT"; then
+      systemctl stop "$UNIT"
+      trap 'systemctl start "$UNIT"' EXIT
+      run "$@"
+    else
+      run "$@"
+      if [ "$DOCKER" -eq 1 ]; then
+        echo "range3d: restart the container to apply this: docker restart <container>"
+      fi
+    fi
+    ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac

@@ -33,13 +33,21 @@ function loadImage(url) {
 }
 
 /**
- * Loads meta.json and every tile, composes them into one canvas and returns a
- * texture plus the Mercator bounds the canvas covers.
+ * Loads a map's meta.json and every tile, composes them into one canvas and
+ * returns a texture plus the Mercator bounds the canvas covers.
+ *
+ * metaUrl   the map's description (default: the installer's own map)
+ * tilesUrl  where its tiles are, as <z>/<x>/<y>.png
+ * accept    optional check on the description, before any tile is fetched
  */
-export async function loadBasemap(baseUrl = 'basemap') {
-  const resp = await fetch(`${baseUrl}/meta.json`, { cache: 'force-cache' });
+export async function loadBasemap({
+  metaUrl = 'basemap/meta.json', tilesUrl = 'basemap', cache = 'force-cache', accept,
+} = {}) {
+  const resp = await fetch(metaUrl, { cache });
   if (!resp.ok) throw new Error(`basemap meta: HTTP ${resp.status}`);
   const meta = await resp.json();
+  if (accept && !accept(meta)) throw new Error('that map is for another location');
+  const baseUrl = tilesUrl;
 
   const across = meta.x1 - meta.x0 + 1;
   const down = meta.y1 - meta.y0 + 1;

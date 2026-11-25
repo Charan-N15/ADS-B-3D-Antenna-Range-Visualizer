@@ -21,6 +21,7 @@ Nothing here runs on the Pi; install.sh does not copy it.
 import argparse
 import http.server
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -30,12 +31,19 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VIEWER_DIR = os.path.join(ROOT, "viewer")
 STATE_DIR = os.path.join(ROOT, "data")
 
-# What the collector writes beside its envelope, and how each is served.
-STATE_FILES = {
-    "envelope.json": "application/json",
-    "heatmap.json": "application/json",
-    "heatmap.bin": "application/octet-stream",
-}
+# What the collector writes into its state directory and may be served: the
+# profile list and status, each antenna profile's files, the shared map tiles,
+# and the old top-level names. Anything else under the directory is not served.
+STATE_PATH = re.compile(
+    r"^(?:(?:envelope|heatmap|antennas|status)\.json|heatmap\.bin"
+    r"|antennas/[a-z0-9-]+/(?:envelope\.json|heatmap\.json|heatmap\.bin|map\.json)"
+    r"|maps/tiles/\d+/\d+/\d+\.png)$")
+STATE_TYPES = {".json": "application/json", ".bin": "application/octet-stream",
+               ".png": "image/png"}
+
+
+def state_type(name):
+    return STATE_TYPES[os.path.splitext(name)[1]]
 
 WATCH_SUFFIXES = (".html", ".css", ".js")
 # The vendored library never changes and the tiles are hundreds of files;
@@ -104,7 +112,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.send_body(RELOAD_CLIENT, "text/javascript")
         if path in ("/", "/index.html"):
             return self.serve_index()
-        if path.startswith("/state/") and path[len("/state/"):] in STATE_FILES:
+        if path.startswith("/state/") and STATE_PATH.match(path[len("/state/"):]):
             return self.serve_state(path[len("/state/"):])
         if path.startswith("/tar1090/"):
             return self.proxy(path[len("/tar1090/"):])
@@ -137,9 +145,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def serve_state(self, name):
         """Local snapshot if there is one, otherwise straight from the receiver."""
-        ctype = STATE_FILES[name]
+        ctype = state_type(name)
         try:
-            with open(os.path.join(STATE_DIR, name), "rb") as fh:
+            with open(os.path.join(STATE_DIR, *name.split("/")), "rb") as fh:
                 return self.send_body(fh.read(), ctype)
         except OSError:
             pass

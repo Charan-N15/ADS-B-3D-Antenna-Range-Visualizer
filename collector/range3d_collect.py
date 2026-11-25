@@ -645,6 +645,431 @@ def accept(ac, now, last_fix, rx):
     return az_bin, band, range_nm, int(fix_t), rec
 
 
+# -------------------------------------------------------------------- profiles
+#
+# Each antenna setup is a profile: its own envelope, heatmap and map, with a name,
+# an antenna height, the receiver position it was recorded at, and dates. One
+# profile is collecting; the rest are archived, kept read-only for the viewer.
+#
+#   <root>/antennas.json              the list, and which profile is collecting
+#   <root>/antennas/<slug>/           envelope.json, heatmap*, map.json
+#   <root>/maps/tiles/<z>/<x>/<y>.png one tile cache that every profile's map uses
+#   <root>/status.json                what the collector is doing, and warnings
+#
+# <root> is the directory of --state. An install from before profiles has its
+# envelope and heatmap there; they become the profile "Antenna 1" on first run,
+# and links are left at the old names so anything reading them still works.
+
+PROFILES_VERSION = 1
+
+# A receiver this far from where its profile was recorded has moved, and its
+# readings would no longer line up with the profile's: a new one is started.
+MOVE_LIMIT_NM = 1.0 / 1.852     # 1 km
+
+# Files that belong to a profile, moved into it from an older install.
+PROFILE_FILES = ("envelope.json", "heatmap.json", "heatmap.bin",
+                 "heatmap-v1.json", "heatmap-v1.bin", "heatmap-weeks")
+
+# Left at the state directory's top level for older viewers and servers, pointing
+# into whichever profile is collecting.
+COMPAT_LINKS = ("envelope.json", "heatmap.json", "heatmap.bin")
+
+
+def slugify(name):
+    slug = "".join(ch if ch.isalnum() else "-" for ch in name.lower())
+    slug = "-".join(part for part in slug.split("-") if part)
+    return slug[:40] or "antenna"
+
+
+def today_label(t):
+    tm = time.localtime(t)
+    return "%d %s" % (tm.tm_mday, time.strftime("%b %Y", tm))
+
+
+def write_json(path, doc):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, indent=1)
+    os.replace(tmp, path)
+
+
+class Profiles:
+    def __init__(self, root):
+        self.root = root
+        self.index_path = os.path.join(root, "antennas.json")
+        self.doc = {"version": PROFILES_VERSION, "collecting": None, "profiles": []}
+
+    # ---------------------------------------------------------------- paths
+
+    def dir(self, p):
+        return os.path.join(self.root, "antennas", p["slug"])
+
+    def envelope_path(self, p):
+        return os.path.join(self.dir(p), "envelope.json")
+
+    def heat_base(self, p):
+        return os.path.join(self.dir(p), "heatmap")
+
+    def map_path(self, p):
+        return os.path.join(self.dir(p), "map.json")
+
+    def tiles_dir(self):
+        return os.path.join(self.root, "maps", "tiles")
+
+    # ---------------------------------------------------------------- reading
+
+    @property
+    def profiles(self):
+        return self.doc["profiles"]
+
+    @property
+    def collecting(self):
+        return self.find(self.doc.get("collecting"))
+
+    def find(self, name):
+        """By slug, or by name ignoring case."""
+        if not name:
+            return None
+        for p in self.profiles:
+            if p["slug"] == name or p["name"].lower() == str(name).lower():
+                return p
+        return None
+
+    def need(self, name):
+        p = self.find(name)
+        if p is None:
+            raise SystemExit("no antenna called %r. `range3d antenna list` shows them."
+                             % name)
+        return p
+
+    # ---------------------------------------------------------------- writing
+
+    def save(self):
+        self.doc["updated"] = int(time.time())
+        os.makedirs(self.root, exist_ok=True)
+        write_json(self.index_path, self.doc)
+        self.link_compat()
+
+    def link_compat(self):
+        """Points the old top-level names at the collecting profile's files.
+        Best effort: a filesystem without symlinks just goes without them."""
+        p = self.collecting
+        if p is None:
+            return
+        for name in COMPAT_LINKS:
+            link = os.path.join(self.root, name)
+            if os.path.exists(link) and not os.path.islink(link):
+                continue        # a real file: not ours to replace
+            target = os.path.join("antennas", p["slug"], name)
+            tmp = link + ".link"
+            try:
+                if os.path.lexists(tmp):
+                    os.remove(tmp)
+                os.symlink(target, tmp)
+                os.replace(tmp, link)
+            except (OSError, NotImplementedError):
+                return
+
+    def unique_slug(self, name):
+        base = slugify(name)
+        slug, n = base, 2
+        taken = {p["slug"] for p in self.profiles}
+        while slug in taken or os.path.exists(os.path.join(self.root, "antennas", slug)):
+            slug = "%s-%d" % (base, n)
+            n += 1
+        return slug
+
+    def add(self, name, rx, antenna_ft=None, now=None):
+        """A new profile, collecting from now; the one collecting before is archived."""
+        if self.find(name):
+            raise SystemExit("there is already an antenna called %r" % name)
+        now = int(now or time.time())
+        current = self.collecting
+        if current is not None:
+            current["archived"] = now
+        p = {"slug": self.unique_slug(name), "name": name, "antennaFt": antenna_ft,
+             "rx": {"lat": rx.get("lat"), "lon": rx.get("lon")},
+             "created": now, "archived": None}
+        os.makedirs(self.dir(p), exist_ok=True)
+        self.profiles.append(p)
+        self.doc["collecting"] = p["slug"]
+        return p
+
+    # ---------------------------------------------------------------- loading
+
+    @classmethod
+    def open(cls, root, rx=None):
+        """The profiles under root, converting an install from before profiles."""
+        profiles = cls(root)
+        if os.path.exists(profiles.index_path):
+            with open(profiles.index_path, "r", encoding="utf-8") as fh:
+                profiles.doc = json.load(fh)
+            if profiles.collecting is None and profiles.profiles:
+                profiles.doc["collecting"] = profiles.profiles[-1]["slug"]
+            return profiles
+        profiles.migrate(rx or {})
+        return profiles
+
+    def migrate(self, rx):
+        """Everything already here becomes "Antenna 1", collecting as before."""
+        os.makedirs(self.root, exist_ok=True)
+        env_path = os.path.join(self.root, "envelope.json")
+        created, env_rx = int(time.time()), {}
+        if os.path.isfile(env_path) and not os.path.islink(env_path):
+            try:
+                with open(env_path, "r", encoding="utf-8") as fh:
+                    head = json.load(fh)
+                created = head.get("created", created)
+                env_rx = head.get("rx") or {}
+            except (OSError, ValueError):
+                pass
+        # The installed antenna height keeps coming from the settings file, as it
+        # always has, so nothing changes for an install that never uses profiles.
+        p = {"slug": "antenna-1", "name": "Antenna 1", "antennaFt": None,
+             "rx": {"lat": env_rx.get("lat", rx.get("lat")),
+                    "lon": env_rx.get("lon", rx.get("lon"))},
+             "created": created, "archived": None}
+        os.makedirs(self.dir(p), exist_ok=True)
+        moved = []
+        for name in PROFILE_FILES:
+            src = os.path.join(self.root, name)
+            if os.path.lexists(src) and not os.path.islink(src):
+                os.replace(src, os.path.join(self.dir(p), name))
+                moved.append(name)
+        self.profiles.append(p)
+        self.doc["collecting"] = p["slug"]
+        self.save()
+        print("profiles: this install's data is now the antenna profile %r (%s)"
+              % (p["name"], ", ".join(moved) if moved else "nothing collected yet"),
+              flush=True)
+
+
+# -------------------------------------------------------------------- status
+#
+# status.json is how the collector tells the viewer about things the person at
+# the browser should know, such as the receiver having moved. Warnings stay until
+# a command that deals with them clears them; the viewer lets each be dismissed.
+
+def status_path(root):
+    return os.path.join(root, "status.json")
+
+
+def read_status(root):
+    try:
+        with open(status_path(root), "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        if isinstance(doc, dict):
+            return doc
+    except (OSError, ValueError):
+        pass
+    return {"warnings": []}
+
+
+def write_status(root, profiles, add=None, clear_kinds=()):
+    doc = read_status(root)
+    warnings = [w for w in doc.get("warnings", []) if w.get("kind") not in clear_kinds]
+    if add:
+        warnings.append(add)
+    doc.update({"version": 1, "updated": int(time.time()),
+                "collecting": profiles.doc.get("collecting"), "warnings": warnings})
+    os.makedirs(root, exist_ok=True)
+    write_json(status_path(root), doc)
+
+
+def check_move(profiles, rx_lat, rx_lon, now=None):
+    """Starts a new profile if the receiver is no longer where the collecting one
+    was recorded. Returns the profile to collect into."""
+    p = profiles.collecting
+    if rx_lat is None or rx_lon is None:
+        return p
+    prx = p.get("rx") or {}
+    if prx.get("lat") is None or prx.get("lon") is None:
+        p["rx"] = {"lat": rx_lat, "lon": rx_lon}
+        profiles.save()
+        return p
+    moved_nm = haversine_nm(prx["lat"], prx["lon"], rx_lat, rx_lon)
+    if moved_nm <= MOVE_LIMIT_NM:
+        return p
+    now = int(now or time.time())
+    name = "New location (%s)" % today_label(now)
+    n = 2
+    while profiles.find(name):
+        name = "New location (%s, %d)" % (today_label(now), n)
+        n += 1
+    old_name = p["name"]
+    new = profiles.add(name, {"lat": rx_lat, "lon": rx_lon}, None, now)
+    profiles.save()
+    km = moved_nm * 1.852
+    write_status(profiles.root, profiles, add={
+        "kind": "moved", "id": "moved-%d" % now, "at": now,
+        "from": old_name, "to": name, "km": round(km, 1),
+        "text": "Receiver moved %s km from where \"%s\" was recorded. \"%s\" is "
+                "archived; collecting continues in \"%s\". Rename it with: sudo "
+                "range3d antenna rename \"%s\" \"<name>\""
+                % (f"{km:,.0f}" if km >= 10 else f"{km:.1f}", old_name, old_name,
+                   name, name)})
+    print("profiles: receiver moved %.1f km from %r; archived it and started %r"
+          % (km, old_name, name), flush=True)
+    return new
+
+
+# ------------------------------------------------------------------ commands
+
+def profile_summary(profiles, p):
+    env_path = profiles.envelope_path(p)
+    max_nm, cells = 0.0, 0
+    try:
+        with open(env_path, "r", encoding="utf-8") as fh:
+            cells_doc = json.load(fh).get("cells", {})
+        cells = len(cells_doc)
+        max_nm = max((c.get("d", 0) for c in cells_doc.values()), default=0.0)
+    except (OSError, ValueError):
+        pass
+    size = 0
+    for dirpath, _, names in os.walk(profiles.dir(p)):
+        for name in names:
+            size += os.path.getsize(os.path.join(dirpath, name))
+    return max_nm, cells, size
+
+
+def fmt_date(t):
+    return time.strftime("%Y-%m-%d", time.localtime(t)) if t else "-"
+
+
+def receiver_position(args):
+    lat, lon = getattr(args, "lat", None), getattr(args, "lon", None)
+    if lat is not None and lon is not None:
+        return {"lat": lat, "lon": lon}
+    try:
+        receiver = fetch_json(args.base_url.rstrip("/") + "/data/receiver.json")
+        if receiver.get("lat") is not None:
+            return {"lat": receiver["lat"], "lon": receiver["lon"]}
+    except (urllib.error.URLError, OSError, ValueError):
+        pass
+    raise SystemExit("could not read the receiver's position from %s; give --lat "
+                     "and --lon" % args.base_url)
+
+
+def fetch_map(profiles, p, args):
+    fetcher = getattr(args, "fetcher", None)
+    if not fetcher:
+        print("no map downloaded (no --fetcher given). Run: sudo range3d antenna map "
+              "\"%s\"" % p["name"])
+        return 1
+    rx = p.get("rx") or {}
+    if rx.get("lat") is None:
+        raise SystemExit("%r has no recorded position to centre a map on" % p["name"])
+    cmd = [sys.executable, fetcher, "--lat", str(rx["lat"]), "--lon", str(rx["lon"]),
+           "--envelope", profiles.envelope_path(p),
+           "--out-dir", profiles.tiles_dir(), "--meta", profiles.map_path(p)]
+    if getattr(args, "radius_nm", None):
+        cmd += ["--radius-nm", str(args.radius_nm)]
+    print("downloading the map for %r" % p["name"], flush=True)
+    import subprocess
+    return subprocess.call(cmd)
+
+
+def cmd_antenna(args):
+    profiles = Profiles.open(args.root)
+    action = args.action
+
+    if action == "list":
+        print("%-28s %-11s %-10s %-10s %8s %7s %6s %8s"
+              % ("antenna", "status", "since", "until", "height", "range", "map", "size"))
+        for p in profiles.profiles:
+            max_nm, _cells, size = profile_summary(profiles, p)
+            status = ("collecting" if p["slug"] == profiles.doc.get("collecting")
+                      else "archived")
+            height = ("%d ft" % p["antennaFt"]) if p.get("antennaFt") is not None else "-"
+            has_map = "yes" if os.path.exists(profiles.map_path(p)) else "no"
+            print("%-28s %-11s %-10s %-10s %8s %5.0fnm %6s %6.1fMB"
+                  % (p["name"][:28], status, fmt_date(p.get("created")),
+                     fmt_date(p.get("archived")), height, max_nm, has_map, size / 1e6))
+        return 0
+
+    if action == "new":
+        rx = receiver_position(args)
+        p = profiles.add(args.name, rx, args.height)
+        profiles.save()
+        write_status(profiles.root, profiles, clear_kinds=("moved",))
+        print("started %r; it is collecting from now on" % p["name"])
+        return fetch_map(profiles, p, args)
+
+    if action == "use":
+        p = profiles.need(args.name)
+        if p["slug"] == profiles.doc.get("collecting"):
+            print("%r is already collecting" % p["name"])
+            return 0
+        rx = p.get("rx") or {}
+        if rx.get("lat") is not None and not args.force:
+            here = receiver_position(args)
+            far = haversine_nm(rx["lat"], rx["lon"], here["lat"], here["lon"])
+            if far > MOVE_LIMIT_NM:
+                raise SystemExit("%r was recorded %.1f km from where the receiver is "
+                                 "now; collecting into it would mix two places. Use "
+                                 "--force if that really is what you want."
+                                 % (p["name"], far * 1.852))
+        now = int(time.time())
+        current = profiles.collecting
+        if current is not None:
+            current["archived"] = now
+        p["archived"] = None
+        profiles.doc["collecting"] = p["slug"]
+        profiles.save()
+        write_status(profiles.root, profiles, clear_kinds=("moved",))
+        print("%r is collecting again; %r is archived"
+              % (p["name"], current["name"] if current else "-"))
+        return 0
+
+    if action == "rename":
+        p = profiles.need(args.name)
+        if profiles.find(args.new_name) and profiles.find(args.new_name) is not p:
+            raise SystemExit("there is already an antenna called %r" % args.new_name)
+        old = p["name"]
+        p["name"] = args.new_name
+        profiles.save()
+        write_status(profiles.root, profiles, clear_kinds=("moved",))
+        print("renamed %r to %r" % (old, args.new_name))
+        return 0
+
+    if action == "height":
+        p = profiles.need(args.name)
+        p["antennaFt"] = args.feet
+        profiles.save()
+        env_path = profiles.envelope_path(p)
+        if os.path.exists(env_path):
+            env = Envelope.load(env_path)
+            env.rx["altFt"] = args.feet
+            env.save(env_path)
+        print("%r: antenna height set to %g ft" % (p["name"], args.feet))
+        return 0
+
+    if action == "delete":
+        p = profiles.need(args.name)
+        if p["slug"] == profiles.doc.get("collecting"):
+            raise SystemExit("%r is collecting; switch to another first with "
+                             "`range3d antenna use`" % p["name"])
+        typed = args.confirm
+        if typed is None and sys.stdin.isatty():
+            max_nm, cells, size = profile_summary(profiles, p)
+            print("This permanently deletes %r: %d envelope cells, %.0f nm max range, "
+                  "%.1f MB. It cannot be undone." % (p["name"], cells, max_nm, size / 1e6))
+            typed = input("Type the antenna's name to confirm: ")
+        if typed != p["name"]:
+            raise SystemExit("not deleted: the name did not match")
+        shutil.rmtree(profiles.dir(p), ignore_errors=True)
+        profiles.profiles.remove(p)
+        profiles.save()
+        print("deleted %r" % p["name"])
+        return 0
+
+    if action == "map":
+        p = profiles.need(args.name)
+        return fetch_map(profiles, p, args)
+
+    raise SystemExit("unknown antenna action %r" % action)
+
+
 def heatmap_base(args):
     """Path prefix for heatmap.json/.bin, or None when disabled.
 
@@ -656,7 +1081,17 @@ def heatmap_base(args):
         return None
     if getattr(args, "heatmap", None):
         return args.heatmap
+    if getattr(args, "profile_heat", None):
+        return args.profile_heat
     return os.path.join(os.path.dirname(os.path.abspath(args.state)), "heatmap")
+
+
+def use_profile(args, profiles, p):
+    """Points the envelope, heatmap and antenna height at a profile's own."""
+    args.state = profiles.envelope_path(p)
+    args.profile_heat = profiles.heat_base(p)
+    if p.get("antennaFt") is not None:
+        args.rx_alt_ft = p["antennaFt"]
 
 
 def cmd_collect(args):
@@ -669,6 +1104,13 @@ def cmd_collect(args):
     except (urllib.error.URLError, OSError, ValueError) as exc:
         print("could not read receiver.json (%s); relying on r_dst/r_dir" % exc,
               flush=True)
+
+    # A receiver that has moved gets a new profile before anything is recorded,
+    # so two places are never mixed into one envelope.
+    profile = check_move(args.profiles, rx_lat, rx_lon)
+    use_profile(args, args.profiles, profile)
+    write_status(args.root, args.profiles)
+    print("collecting into the antenna profile %r" % profile["name"], flush=True)
 
     env = Envelope.load_or_new(args.state, rx_lat, rx_lon, args.rx_alt_ft)
     print("state %s: %d cells, %d samples"
@@ -948,7 +1390,46 @@ def main(argv=None):
     stats.add_argument("--min-hits", type=int, default=2)
     stats.set_defaults(func=cmd_stats)
 
+    antenna = sub.add_parser("antenna", help="list, add and switch antenna profiles")
+    actions = antenna.add_subparsers(dest="action", required=True)
+    actions.add_parser("list", help="every antenna profile and which is collecting")
+    new = actions.add_parser("new", help="archive the collecting antenna and start a "
+                                         "new one here")
+    new.add_argument("name")
+    new.add_argument("--height", type=float, default=None,
+                     help="antenna height above sea level, feet")
+    use = actions.add_parser("use", help="collect into an archived antenna again")
+    use.add_argument("name")
+    use.add_argument("--force", action="store_true",
+                     help="even if it was recorded somewhere else")
+    rename = actions.add_parser("rename", help="rename an antenna")
+    rename.add_argument("name")
+    rename.add_argument("new_name")
+    height = actions.add_parser("height", help="set an antenna's height")
+    height.add_argument("name")
+    height.add_argument("feet", type=float)
+    delete = actions.add_parser("delete", help="permanently delete an archived antenna")
+    delete.add_argument("name")
+    delete.add_argument("--confirm", default=None,
+                        help="the antenna's name again, instead of being asked")
+    amap = actions.add_parser("map", help="download or refresh an antenna's map")
+    amap.add_argument("name")
+    for cmd in (new, use):
+        cmd.add_argument("--lat", type=float, default=None,
+                         help="receiver position, if receiver.json cannot be read")
+        cmd.add_argument("--lon", type=float, default=None)
+    for cmd in (new, amap):
+        cmd.add_argument("--fetcher", default=None,
+                         help="path to fetch-basemap.py, to download the map")
+        cmd.add_argument("--radius-nm", type=float, default=None)
+    antenna.set_defaults(func=cmd_antenna)
+
     args = parser.parse_args(argv)
+    # Everything lives beside --state, now in one folder per antenna profile.
+    args.root = os.path.dirname(os.path.abspath(args.state))
+    if args.cmd != "antenna":
+        args.profiles = Profiles.open(args.root)
+        use_profile(args, args.profiles, args.profiles.collecting)
     return args.func(args)
 
 

@@ -107,6 +107,9 @@ fi
 
 install -d -o "$USER_NAME" -g "$USER_NAME" -m 0755 "$STATE_DIR"
 install -o root -g root -m 0755 "$SRC_DIR/collector/range3d_collect.py" "$BIN"
+# `range3d antenna ...` manages antenna profiles, and downloads each one's map.
+install -o root -g root -m 0755 "$SRC_DIR/systemd/range3d" /usr/local/bin/range3d
+install -o root -g root -m 0755 "$SRC_DIR/tools/fetch-basemap.py"   /usr/local/bin/range3d-fetch-basemap.py
 
 # The defaults file is the supported place to change settings; it is never
 # overwritten once it exists, so upgrades keep your configuration.
@@ -269,6 +272,7 @@ echo "Done."
 echo "  viewer     http://$HOST/range3d/"
 echo "  collector  systemctl status $UNIT_NAME"
 echo "  settings   $DEFAULTS"
+echo "  antennas   sudo range3d antenna list"
 echo
 if [ -z "$ANTENNA_FT" ] && ! grep -q '^RANGE3D_ANTENNA_FT' "$DEFAULTS" 2>/dev/null; then
   echo "  Set your antenna's height above sea level in $DEFAULTS to make the"

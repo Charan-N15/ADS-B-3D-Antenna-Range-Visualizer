@@ -16,12 +16,13 @@ COPY collector/ collector/
 COPY tools/fetch-basemap.py tools/
 COPY viewer/ viewer/
 COPY docker/ docker/
+COPY systemd/range3d /usr/local/bin/range3d
 
 # Map tiles are fetched at runtime into the data volume; the viewer finds them
 # through this link, which keeps the image itself location-agnostic.
 RUN rm -rf viewer/basemap \
  && ln -s /data/basemap viewer/basemap \
- && chmod 0755 docker/entrypoint.sh
+ && chmod 0755 docker/entrypoint.sh /usr/local/bin/range3d
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1

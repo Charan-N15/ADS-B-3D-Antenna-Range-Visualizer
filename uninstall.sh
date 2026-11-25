@@ -31,7 +31,7 @@ say() { echo "==> $*"; }
 if systemctl list-unit-files "$UNIT_NAME" >/dev/null 2>&1; then
   systemctl disable --now "$UNIT_NAME" >/dev/null 2>&1 || true
 fi
-rm -f "$UNIT" "$BIN"
+rm -f "$UNIT" "$BIN" /usr/local/bin/range3d /usr/local/bin/range3d-fetch-basemap.py
 systemctl daemon-reload
 say "collector stopped and removed"
 
@@ -56,6 +56,12 @@ for candidate in /usr/local/share/tar1090/html/config.js /usr/share/tar1090/html
 done
 
 if [ "$PURGE" -eq 1 ]; then
+  # Say exactly what is about to go: with antenna profiles it can be several
+  # antennas' worth of collecting, none of which can be regenerated.
+  if [ -f "$STATE_DIR/antennas.json" ]; then
+    echo "  deleting every antenna profile:"
+    python3 -c 'import json,sys; [print("    -", p["name"]) for p in json.load(open(sys.argv[1]))["profiles"]]'       "$STATE_DIR/antennas.json" 2>/dev/null || true
+  fi
   rm -rf "$STATE_DIR"
   rm -f "$DEFAULTS"
   userdel "$USER_NAME" 2>/dev/null || true

@@ -181,6 +181,52 @@ A heatmap from the first version (dense uint16, counting positions) cannot be
 converted, since its counts measure time rather than flights. The collector moves it
 aside as `heatmap-v1.json`/`.bin` and starts a new one. The viewer reads both.
 
+### 4.2 Antenna profiles
+
+Each antenna setup is a **profile** with its own envelope, heatmap and map, a name, an
+antenna height, the receiver position it was recorded at, and dates. One profile is
+collecting; the rest are archived and stay viewable. Everything sits beside `--state`:
+
+```
+antennas.json                 the profiles, and which one is collecting
+antennas/<slug>/              envelope.json, heatmap.*, heatmap-weeks/, map.json
+maps/tiles/<z>/<x>/<y>.png    one tile cache shared by every profile's map
+status.json                   warnings for the viewer, such as a receiver move
+```
+
+An install from before profiles has its files at the top level. On first run they are
+moved into the profile **Antenna 1**, and links are left at the old names pointing into
+whichever profile is collecting, so older viewers and servers keep working. Antenna 1
+takes its height from the settings file as before; a profile's own height, once set,
+takes precedence.
+
+Profiles are changed only on the Pi, never from the browser, since anyone on the
+network can open the viewer:
+
+| `sudo range3d antenna ...` | |
+|---|---|
+| `list` | every profile, its dates, height, range, map and size |
+| `new NAME [--height FT]` | archive the collecting profile and start a new one here, with its map |
+| `use NAME` | collect into an archived profile again; refused if it was recorded elsewhere |
+| `rename NAME NEW` | rename (the folder name stays) |
+| `height NAME FT` | set a profile's antenna height |
+| `delete NAME` | delete an archived profile; the name must be typed back |
+| `map NAME` | download or refresh a profile's map |
+
+Changes pause the collector for a moment; it reads the profiles when it starts.
+
+**Moving.** At start the collector compares the receiver position readsb reports with
+the collecting profile's. More than 1 km apart, it archives that profile untouched and
+collects into a new one named for the date, and writes a warning to `status.json`. Two
+places are never mixed into one envelope, and collecting never stops. The viewer shows
+the warning as a banner until it is dismissed, and keeps it under Info.
+
+**Viewer.** With more than one profile, a switcher sits above the panel. Choosing the
+collecting profile follows it, including to a new one after a move. Live traffic is
+drawn only on profiles at the receiver's current position. Each profile uses its own
+map, or the installer's map when it is at the place that map was made for; otherwise
+the viewer says how to download one.
+
 ## 5. Collector
 
 `collector/range3d_collect.py`. Python 3, standard library only, no build step, no

@@ -154,6 +154,12 @@ def main():
                         help="seconds between requests")
     parser.add_argument("--force", action="store_true",
                         help="re-download tiles already present")
+    parser.add_argument("--out-dir", default=OUT_DIR,
+                        help="where tiles are stored, as <z>/<x>/<y>.png "
+                             "(default: the viewer's basemap folder)")
+    parser.add_argument("--meta", default=None,
+                        help="where to write the map's meta.json "
+                             "(default: inside --out-dir)")
     parser.add_argument("--dry-run", action="store_true",
                         help="work out the radius, zoom and tiles, then stop")
     args = parser.parse_args()
@@ -193,11 +199,13 @@ def main():
     if args.dry_run:
         return 0
 
-    os.makedirs(OUT_DIR, exist_ok=True)
+    out_dir = args.out_dir
+    meta_path = args.meta or os.path.join(out_dir, "meta.json")
+    os.makedirs(out_dir, exist_ok=True)
     fetched = skipped = failed = 0
     for x in range(x0, x1 + 1):
         for y in range(y0, y1 + 1):
-            path = os.path.join(OUT_DIR, str(zoom), str(x), "%d.png" % y)
+            path = os.path.join(out_dir, str(zoom), str(x), "%d.png" % y)
             if os.path.exists(path) and not args.force:
                 skipped += 1
                 continue
@@ -224,11 +232,13 @@ def main():
         "attribution": args.attribution,
         "fetched": int(time.time()),
     }
-    with open(os.path.join(OUT_DIR, "meta.json"), "w", encoding="utf-8") as fh:
+    os.makedirs(os.path.dirname(os.path.abspath(meta_path)), exist_ok=True)
+    with open(meta_path + ".tmp", "w", encoding="utf-8") as fh:
         json.dump(meta, fh, indent=2)
+    os.replace(meta_path + ".tmp", meta_path)
 
     size = sum(os.path.getsize(os.path.join(dirpath, name))
-               for dirpath, _, names in os.walk(OUT_DIR) for name in names)
+               for dirpath, _, names in os.walk(out_dir) for name in names)
     print("fetched %d, already present %d, failed %d, %.1f MB on disk"
           % (fetched, skipped, failed, size / 1e6))
     return 0

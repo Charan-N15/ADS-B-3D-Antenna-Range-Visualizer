@@ -15,6 +15,7 @@ Standard library only.
 import argparse
 import http.server
 import os
+import re
 import urllib.error
 import urllib.request
 
@@ -35,12 +36,19 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 OPENER = urllib.request.build_opener(NoRedirect)
 
-# What the collector writes into its state directory, and how each is served.
-STATE_FILES = {
-    "envelope.json": "application/json",
-    "heatmap.json": "application/json",
-    "heatmap.bin": "application/octet-stream",
-}
+# What the collector writes into its state directory and may be served: the
+# profile list and status, each antenna profile's files, the shared map tiles,
+# and the old top-level names. Anything else under the directory is not served.
+STATE_PATH = re.compile(
+    r"^(?:(?:envelope|heatmap|antennas|status)\.json|heatmap\.bin"
+    r"|antennas/[a-z0-9-]+/(?:envelope\.json|heatmap\.json|heatmap\.bin|map\.json)"
+    r"|maps/tiles/\d+/\d+/\d+\.png)$")
+STATE_TYPES = {".json": "application/json", ".bin": "application/octet-stream",
+               ".png": "image/png"}
+
+
+def state_type(name):
+    return STATE_TYPES[os.path.splitext(name)[1]]
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -61,7 +69,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
-        if path.startswith("/state/") and path[len("/state/"):] in STATE_FILES:
+        if path.startswith("/state/") and STATE_PATH.match(path[len("/state/"):]):
             return self.serve_state(path[len("/state/"):])
         if path == "/tar1090":
             return self.redirect("/tar1090/")
@@ -82,8 +90,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
 
     def serve_state(self, name):
-        # The collector writes the heatmap beside the envelope.
-        path = os.path.join(os.path.dirname(self.state_file), name)
+        # Everything the collector writes sits beside the envelope. The pattern
+        # above admits no "..", so this stays inside the state directory.
+        path = os.path.join(os.path.dirname(self.state_file), *name.split("/"))
         try:
             with open(path, "rb") as fh:
                 body = fh.read()
@@ -91,9 +100,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_error(404, "no %s yet; the collector writes one shortly" % name)
             return
         self.send_response(200)
-        self.send_header("Content-Type", STATE_FILES[name])
+        self.send_header("Content-Type", state_type(name))
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        # Map tiles never change once fetched; everything else changes all the time.
+        self.send_header("Cache-Control", "max-age=86400" if name.endswith(".png")
+                         else "no-store")
         self.end_headers()
         self.wfile.write(body)
 

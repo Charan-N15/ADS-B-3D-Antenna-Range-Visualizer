@@ -19,11 +19,20 @@ import { TAR1090_PATH } from './config.js';
 import { initTypes, typeOf, shapeFor } from './types.js';
 import { LabelLayer, DEFAULT_LABEL_FIELDS, labelLines } from './labels.js';
 import { PLANE_PX } from './shapes.js';
+import { haversineNm } from './geo.js';
 import {
   loadHeatmap, buildTubeTexture, buildHeatVolume, summarizeHeat, hitsForBusiest,
 } from './heat.js';
 
 const params = new URLSearchParams(location.search);
+// Antenna profiles are read from the collector, unless the page was pointed at
+// particular files, which is for testing and always shows just those.
+const PROFILE_MODE = !params.get('envelope') && !params.get('heatmap');
+const PROFILES_URL = 'state/antennas.json';
+const STATUS_URL = 'state/status.json';
+// Within this of the collecting antenna, a profile is at the same place, so
+// live traffic and the installer's map belong on it too.
+const SAME_PLACE_NM = 1 / 1.852;
 const ENVELOPE_URL = params.get('envelope') || 'state/envelope.json';
 const HEAT_URL = params.get('heatmap') || 'state/heatmap';
 // Where the "return to 2D" link goes, and where live traffic is read from. Both
@@ -53,6 +62,8 @@ const DEFAULT_UI = {
     basemap: true, footprint: true, aircraft3d: true,
     heat: false, labels: false, trails: false,
   },
+  // The antenna profile being viewed; empty follows whichever is collecting.
+  profile: '',
   labelFields: { ...DEFAULT_LABEL_FIELDS },
   heatBusiestPct: 30,
   extendHorizon: false,
@@ -97,6 +108,10 @@ if (!ui.layers.horizon) ui.extendHorizon = false;
 // then with it wide open would now hide everything above 50,000.
 if (savedSettings && [50000, 60000].includes(savedSettings.altMaxFt)) ui.altMaxFt = ALT_TOP_FT;
 
+let profiles = null;   // antennas.json, or null from a collector without profiles
+let viewing = null;    // the profile on screen
+let liveHere = true;   // whether live traffic belongs on the profile on screen
+let warnings = [];     // from status.json, plus any the viewer raises itself
 let doc = null;        // raw envelope state
 let model = null;      // gridded form
 let maxRangeNm = 100;
@@ -162,6 +177,7 @@ function altFilterIsOpen() {
 
 /** Live traffic inside the altitude window. */
 function visibleContacts() {
+  if (!liveHere) return [];
   if (altFilterIsOpen()) return contacts;
   return contacts.filter(
     (c) => c.altFt >= ui.altMinFt && c.altFt <= ui.altMaxFt);
@@ -288,16 +304,203 @@ function updateCellHighlight() {
   scene.add(cellHighlight);
 }
 
+/** True when two positions are the same place, as far as maps and traffic go. */
+function samePlace(a, b) {
+  if (a?.lat == null || b?.lat == null) return true;
+  return haversineNm(a.lat, a.lon, b.lat, b.lon) <= SAME_PLACE_NM;
+}
+
+/**
+ * The map for the profile on screen: its own if it has one, otherwise the
+ * installer's map when the profile is where that map was made for. Anywhere
+ * else there is no map until one is downloaded for it.
+ */
 async function initBasemap() {
+  basemap = null;
+  removeWarning('nomap');
   try {
-    basemap = await loadBasemap();
+    if (viewing) {
+      try {
+        basemap = await loadBasemap({
+          metaUrl: `state/antennas/${viewing.slug}/map.json`,
+          tilesUrl: 'state/maps/tiles', cache: 'no-store',
+        });
+      } catch (err) {
+        basemap = await loadBasemap({ accept: (meta) => samePlace(meta.center, viewing.rx) })
+          .catch(() => null);
+      }
+      if (!basemap) {
+        addWarning({
+          kind: 'nomap', id: `nomap-${viewing.slug}`,
+          text: `No map for "${viewing.name}" yet. On the Pi, run: `
+            + `sudo range3d antenna map "${viewing.name}"`,
+        });
+        throw new Error(`no map for ${viewing.name}`);
+      }
+    } else {
+      basemap = await loadBasemap();
+    }
     el('attribution').textContent = basemap.meta.attribution || '';
-    rebuildScene();
+    el('layerBasemap').disabled = false;
   } catch (err) {
     // No tiles is not a failure worth shouting about; the scope works without them.
     el('attribution').textContent = '';
     console.warn('basemap unavailable:', err.message);
     el('layerBasemap').disabled = true;
+  }
+  rebuildScene();
+}
+
+// -------------------------------------------------------------------- profiles
+
+function envelopeUrl() {
+  return viewing ? `state/antennas/${viewing.slug}/envelope.json` : ENVELOPE_URL;
+}
+
+function heatUrl() {
+  return viewing ? `state/antennas/${viewing.slug}/heatmap` : HEAT_URL;
+}
+
+/**
+ * Reads the profile list. A viewer left on "follow the collecting one" moves
+ * with it, so after the receiver moves house the new profile comes up by itself.
+ * Returns true when the profile on screen changed.
+ */
+async function refreshProfiles() {
+  if (!PROFILE_MODE) return false;
+  try {
+    const resp = await fetch(PROFILES_URL, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    profiles = await resp.json();
+  } catch (err) {
+    profiles = null;     // a collector from before profiles: one envelope, as ever
+  }
+  const list = profiles?.profiles || [];
+  const collecting = list.find((p) => p.slug === profiles?.collecting) || null;
+  const next = list.find((p) => p.slug === ui.profile) || collecting;
+  const changed = (next?.slug || null) !== (viewing?.slug || null);
+  viewing = next;
+  liveHere = !viewing || !collecting || viewing.slug === collecting.slug
+    || samePlace(viewing.rx, collecting.rx);
+  renderProfileBar();
+  renderProfileInfo();
+  return changed;
+}
+
+function fmtDate(epochSec) {
+  if (!epochSec) return '—';
+  return new Date(epochSec * 1000).toLocaleDateString(undefined,
+    { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function renderProfileBar() {
+  const list = profiles?.profiles || [];
+  // One antenna needs no choosing; the bar appears once there is a second.
+  el('profileBar').hidden = list.length < 2;
+  const select = el('profileSelect');
+  select.innerHTML = '';
+  for (const p of list) {
+    const option = document.createElement('option');
+    option.value = p.slug;
+    option.textContent = p.slug === profiles.collecting ? `${p.name} ●` : p.name;
+    option.selected = p.slug === viewing?.slug;
+    select.append(option);
+  }
+  if (!viewing) return;
+  el('profileTag').textContent = viewing.slug === profiles.collecting
+    ? `Collecting since ${fmtDate(viewing.created)}`
+    : `Archived · ${fmtDate(viewing.created)} – ${fmtDate(viewing.archived)}`;
+}
+
+function renderProfileInfo() {
+  el('profileGroup').hidden = !viewing;
+  if (!viewing) return;
+  const collecting = viewing.slug === profiles.collecting;
+  const height = viewing.antennaFt ?? doc?.rx?.altFt;
+  const rx = viewing.rx || {};
+  defList(el('profileStats'), [
+    ['name', viewing.name],
+    ['status', collecting ? 'collecting' : 'archived'],
+    ['antenna', typeof height === 'number' ? `${height.toLocaleString()} ft` : '—'],
+    ['location', rx.lat != null ? `${rx.lat.toFixed(4)}, ${rx.lon.toFixed(4)}` : '—'],
+    ['since', fmtDate(viewing.created)],
+    ['until', collecting ? 'now' : fmtDate(viewing.archived)],
+  ]);
+}
+
+/** Shows another profile: its envelope, heatmap and map, framed afresh. */
+async function showProfile(slug) {
+  ui.profile = slug === profiles?.collecting ? '' : slug;
+  await refreshProfiles();
+  selectedCell = null;
+  el('pickGroup').hidden = true;
+  updatePickNotice();
+  heat = null;
+  heatVolumeKey = null;
+  el('heatGroup').hidden = true;
+  await refreshEnvelope(true, true);
+  await initBasemap();
+  refreshHeat();
+  renderBanner();
+  setStatus(null);
+}
+
+// --------------------------------------------------------------------- banner
+
+const DISMISSED_KEY = 'range3d.dismissed';
+
+function dismissed() {
+  try {
+    return new Set(JSON.parse(window.localStorage.getItem(DISMISSED_KEY) || '[]'));
+  } catch (err) {
+    return new Set();
+  }
+}
+
+function addWarning(w) {
+  warnings = warnings.filter((x) => x.id !== w.id).concat(w);
+  renderBanner();
+}
+
+function removeWarning(kind) {
+  warnings = warnings.filter((w) => w.kind !== kind || w.source === 'collector');
+  renderBanner();
+}
+
+async function refreshStatus() {
+  if (!PROFILE_MODE) return;
+  let fromCollector = [];
+  try {
+    const resp = await fetch(STATUS_URL, { cache: 'no-store' });
+    if (resp.ok) {
+      fromCollector = ((await resp.json()).warnings || [])
+        .map((w) => ({ ...w, source: 'collector' }));
+    }
+  } catch (err) { /* no status: nothing to say */ }
+  warnings = warnings.filter((w) => w.source !== 'collector').concat(fromCollector);
+  renderBanner();
+}
+
+/**
+ * The first warning not dismissed in this browser, across the top of the view.
+ * Dismissing hides that one warning; a new one shows again.
+ */
+function renderBanner() {
+  const gone = dismissed();
+  const w = warnings.find((x) => !gone.has(x.id));
+  el('banner').hidden = !w;
+  if (w) {
+    el('bannerText').textContent = w.text;
+    el('banner').dataset.id = w.id;
+  }
+  // Kept in Info too, where dismissing does not reach.
+  el('warningGroup').hidden = warnings.length === 0;
+  el('warningList').innerHTML = '';
+  for (const x of warnings) {
+    const item = document.createElement('p');
+    item.className = 'warning';
+    item.textContent = x.text;
+    el('warningList').append(item);
   }
 }
 
@@ -320,18 +523,20 @@ function rebuildModel() {
   rebuildScene();
 }
 
-async function refreshEnvelope(first) {
+async function refreshEnvelope(first, switched = false) {
   try {
-    doc = await loadEnvelope(ENVELOPE_URL);
+    doc = await loadEnvelope(envelopeUrl());
     // The collector's configured antenna height is the installation's truth, but a
     // setting this browser explicitly saved was a deliberate choice, so it wins.
-    // RESET gets you back to whatever the collector says.
-    if (first && !hasSavedSettings && typeof doc.rx?.altFt === 'number') {
+    // RESET gets you back to whatever the collector says. Picking another antenna
+    // is a choice too, of that antenna's height.
+    if (first && (switched || !hasSavedSettings) && typeof doc.rx?.altFt === 'number') {
       ui.rxAltFt = doc.rx.altFt;
       el('rxAlt').value = String(doc.rx.altFt);
     }
     rebuildModel();
     if (first) frameCamera();
+    renderProfileInfo();
     setStatus(null);
   } catch (err) {
     setStatus(`envelope: ${err.message}`, true);
@@ -340,7 +545,7 @@ async function refreshEnvelope(first) {
 
 async function refreshHeat() {
   try {
-    heat = await loadHeatmap(HEAT_URL);
+    heat = await loadHeatmap(heatUrl());
     rebuildHeat();
     renderHeatStats();
   } catch (err) {
@@ -552,6 +757,13 @@ function renderHeatStats() {
 
 function setStatus(text, isError) {
   const node = el('status');
+  // Traffic, and any trouble fetching it, is about where the receiver is now.
+  if (!liveHere && (!text || text.startsWith('traffic:'))) {
+    // Live traffic is where the receiver is now, which is not here.
+    node.textContent = 'archived · no live traffic';
+    node.classList.remove('error');
+    return;
+  }
   if (!text) {
     const shown = visibleContacts().length;
     node.textContent = altFilterIsOpen()
@@ -679,7 +891,7 @@ function setView(name) {
 
 function drawSlice() {
   const window = ui.sliceSpread;
-  const inWindow = contacts.filter((c) => {
+  const inWindow = (liveHere ? contacts : []).filter((c) => {
     const diff = Math.abs(((c.az - ui.sliceAz + 540) % 360) - 180);
     return 180 - diff <= window;
   });
@@ -867,6 +1079,16 @@ function wireUi() {
       showSection(button.dataset.sect);
     });
   }
+
+  el('profileSelect').addEventListener('change', (ev) => showProfile(ev.target.value));
+  el('bannerClose').addEventListener('click', () => {
+    const gone = dismissed();
+    gone.add(el('banner').dataset.id);
+    try {
+      window.localStorage.setItem(DISMISSED_KEY, JSON.stringify([...gone]));
+    } catch (err) { /* storage blocked: it just comes back next visit */ }
+    renderBanner();
+  });
 
   el('panelToggle').addEventListener('click', () => {
     setPanelCollapsed(!ui.panelCollapsed);
@@ -1059,13 +1281,23 @@ applyUiToControls();
 renderAltitudeLegend();
 resize();
 animate();
+await refreshProfiles();
 await refreshEnvelope(true);
 setView(ui.view);
 initBasemap();
 refreshHeat();
+refreshStatus();
 await refreshAircraft();
 setStatus(null);
-setInterval(() => refreshEnvelope(false), ENVELOPE_REFRESH_MS);
+setInterval(async () => {
+  // A new profile (the receiver moved, or one was started) is picked up here.
+  if (await refreshProfiles()) {
+    await showProfile(viewing?.slug);
+  } else {
+    await refreshEnvelope(false);
+  }
+  refreshStatus();
+}, ENVELOPE_REFRESH_MS);
 setInterval(refreshHeat, HEAT_REFRESH_MS);
 setInterval(async () => {
   await refreshAircraft();
