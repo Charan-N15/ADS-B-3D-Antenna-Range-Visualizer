@@ -386,6 +386,13 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   white-space: pre;
 }
 
+.labelFlag {
+  width: 15px;
+  height: 10px;
+  margin: 2px 4px 0 0;
+  vertical-align: top;
+}
+
 .labelPreviewEmpty {
   position: absolute;
   left: 25px;

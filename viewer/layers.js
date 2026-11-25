@@ -573,8 +573,8 @@ export class AircraftLayer {
 const TRAIL_LIGHTEN = 0.45;
 const _white = new THREE.Color(0xffffff);
 
-/** How opaque a trail is right behind the aircraft. It fades to nothing at the tail. */
-const TRAIL_OPACITY = 0.4;
+/** How opaque a trail is, the same from the aircraft back to the tail. */
+const TRAIL_OPACITY = 0.35;
 
 /** A trail's width on screen, as a share of the aircraft's length: about its wingspan. */
 const TRAIL_WIDTH = 0.8;
@@ -618,7 +618,7 @@ const _z = new THREE.Vector3(0, 0, 1);
  * Where each aircraft has been, as a flat ribbon behind it through every
  * position heard since it appeared. The ribbon lies level, and rolls with the
  * aircraft where it was banking, so turns twist it the way the aircraft went
- * through them. It is widest and most solid at the aircraft and fades out
+ * through them. It is the same strength from the aircraft back to its tail
  * toward the oldest end.
  *
  * Every trail shares one mesh, so a sky full of them is still a single draw.
@@ -700,8 +700,6 @@ export class TrailLayer {
       const n = points.length;
       if (n < 2) continue;
       const centres = points.map((p) => project(p.az, p.rangeNm, p.altFt, opts));
-      const t0 = points[0].t;
-      const span = Math.max(1e-6, points[n - 1].t - t0);
       _s.set(1, 0, 0);
       for (let i = 0; i < n; i++) {
         const p = points[i];
@@ -724,8 +722,7 @@ export class TrailLayer {
           ? tint.copy(altitudeThreeColor(Math.round(p.altFt / 100) * 100)).lerp(_white, TRAIL_LIGHTEN)
           : flat;
         c.getRGB(rgb, THREE.SRGBColorSpace);
-        // Solid at the aircraft, gone at the tail.
-        const a = TRAIL_OPACITY * ((p.t - t0) / span);
+        const a = TRAIL_OPACITY;
 
         for (const e of [-1, 1]) {
           pos.set(centres[i], v * 3);

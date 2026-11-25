@@ -18,6 +18,7 @@ import { SliceView } from './slice.js';
 import { TAR1090_PATH } from './config.js';
 import { initTypes, typeOf, shapeFor } from './types.js';
 import { LabelLayer, DEFAULT_LABEL_FIELDS, labelLines } from './labels.js';
+import { initCountries, countryOf, flagImage, flagUrl } from './countries.js';
 import { PLANE_PX } from './shapes.js';
 import { haversineNm } from './geo.js';
 import {
@@ -42,6 +43,7 @@ const HEAT_URL = params.get('heatmap') || 'state/heatmap';
 const TAR1090_URL = (params.get('tar1090') || TAR1090_PATH).replace(/\/?$/, '/');
 const AIRCRAFT_URL = params.get('aircraft') || `${TAR1090_URL}data/aircraft.json`;
 initTypes(TAR1090_URL);
+initCountries(TAR1090_URL);
 const ENVELOPE_REFRESH_MS = 60000;
 // The collector rewrites the heatmap every five minutes; no point asking sooner.
 const HEAT_REFRESH_MS = 300000;
@@ -654,6 +656,29 @@ function recordTrails(now, list) {
   }
 }
 
+/**
+ * Messages a second from each aircraft. readsb reports a running total; the rate
+ * is its rise over the last few seconds, so one burst does not read as a flood.
+ */
+const RATE_WINDOW_S = 10;
+const messageHistory = new Map();   // hex -> [{ t, n }], oldest first
+
+function messageRate(hex, now, total) {
+  if (typeof total !== 'number') return null;
+  let history = messageHistory.get(hex);
+  if (!history) messageHistory.set(hex, history = []);
+  if (!history.length || history[history.length - 1].t < now) history.push({ t: now, n: total });
+  while (history.length > 2 && history[0].t < now - RATE_WINDOW_S) history.shift();
+  const first = history[0];
+  const span = now - first.t;
+  // A count that went down means readsb restarted; start again from here.
+  if (total < first.n) {
+    messageHistory.set(hex, [{ t: now, n: total }]);
+    return null;
+  }
+  return span >= 2 ? (total - first.n) / span : null;
+}
+
 async function refreshAircraft() {
   try {
     const resp = await fetch(AIRCRAFT_URL, { cache: 'no-store' });
@@ -667,6 +692,7 @@ async function refreshAircraft() {
       let alt = typeof ac.alt_geom === 'number' ? ac.alt_geom : ac.alt_baro;
       if (typeof alt !== 'number') continue;
       const info = typeOf(ac.hex);
+      const country = countryOf(ac.hex);
       out.push({
         hex: ac.hex,
         flight: (ac.flight || '').trim(),
@@ -685,6 +711,9 @@ async function refreshAircraft() {
         squawk: ac.squawk || null,
         labelAltFt: typeof ac.alt_baro === 'number' ? ac.alt_baro : alt,
         rssi: typeof ac.rssi === 'number' ? ac.rssi : null,
+        msgRate: messageRate(ac.hex, snapshot.now, ac.messages),
+        country: country ? country.name : null,
+        flag: country ? flagImage(country.code) : null,
         onGround: ac.alt_baro === 'ground',
       });
     }
@@ -692,6 +721,9 @@ async function refreshAircraft() {
     // Forget aircraft that have not been heard for a while.
     for (const [hex, history] of trackHistory) {
       if (history[history.length - 1].t < snapshot.now - 60) trackHistory.delete(hex);
+    }
+    for (const [hex, history] of messageHistory) {
+      if (history[history.length - 1].t < snapshot.now - 60) messageHistory.delete(hex);
     }
     trafficNow = snapshot.now;
     recordTrails(snapshot.now, out);
@@ -932,7 +964,9 @@ function animate() {
 /** A made-up aircraft, so the preview shows every field even with no traffic. */
 const LABEL_SAMPLE = {
   hex: 'a1b2c3', flight: 'UAL1234', type: 'B738', labelAltFt: 35000, vs: -1200,
-  rangeNm: 62, rssi: -18.4,
+  rangeNm: 62, rssi: -18.4, msgRate: 4.8,
+  // A stand-in so labelLines leaves room; the preview shows the real image.
+  flag: true,
 };
 
 /** Puts the chosen label fields onto the strip's buttons and the preview box. */
@@ -945,6 +979,15 @@ function renderLabelFields() {
   const lines = labelLines(LABEL_SAMPLE, ui.labelFields);
   const box = el('labelPreviewBox');
   box.textContent = lines.join('\n');
+  if (ui.labelFields.country && lines.length) {
+    const flag = document.createElement('img');
+    flag.className = 'labelFlag';
+    flag.alt = 'US';
+    flag.src = flagUrl('us');
+    // Without tar1090's flags the preview just goes without, as labels do.
+    flag.onerror = () => flag.remove();
+    box.prepend(flag);
+  }
   box.hidden = !lines.length;
   el('labelPreviewEmpty').hidden = lines.length > 0;
 }
