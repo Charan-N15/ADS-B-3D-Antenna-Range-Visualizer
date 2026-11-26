@@ -9,7 +9,7 @@
   --sunken: #0e0f12;
 
   /* ink. --faint is the one that used to fail contrast; it carries headings,
-     rail labels, the hint line and every dt, so it is held above 4.5:1. */
+     rail labels and every dt, so it is held above 4.5:1. */
   --fg: #f2f3f5;
   --dim: #aab0b8;
   --faint: #767c85;
@@ -461,15 +461,16 @@ dd {
 #labels { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 #slice { background: var(--bg); }
 
-#hint {
+/* The pixel logo, over the map credit in the corner. Pixels stay square. */
+#logo {
   position: absolute;
-  left: 50%;
-  bottom: 9px;
-  transform: translateX(-50%);
-  color: var(--faint);
-  font-size: var(--size-small);
+  right: 10px;
+  bottom: 30px;
+  width: 32px;
+  height: 32px;
+  image-rendering: pixelated;
+  opacity: 0.75;
   pointer-events: none;
-  white-space: nowrap;
 }
 
 #attribution {

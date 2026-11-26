@@ -898,7 +898,6 @@ function setView(name) {
   el('slice').hidden = !isSlice;
   sceneCanvas.hidden = isSlice;
   el('sliceControls').hidden = !isSlice;
-  el('hint').hidden = isSlice;
   el('labels').hidden = isSlice;
 
   // The bearing and spread controls live in the view section, so switching to
